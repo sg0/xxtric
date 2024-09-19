@@ -61,7 +61,7 @@ class TriangleCounting
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), tdisp_(nullptr),
-      recv_count_(nullptr), rindex_(0), rdegree_(0), nwin_(MPI_WIN_NULL), dwin_(MPI_WIN_NULL)
+      recv_count_(nullptr), rindex_(0), rdegree_(0), win_(MPI_WIN_NULL)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -506,55 +506,50 @@ class TriangleCounting
       {
         if (rbuf_[p*bufsize_] != -999)
         { 
-          GraphElem tup[2] = {-1,-1}, prev = 0;
-          int count = 0;
+          GraphElem tup[2] = {-1,-1}, prev = 0, k = 0;
+          const int source = sources_[p];
 
-          const int source = status.MPI_SOURCE;
-
-          MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
-
-          if (source != MPI_ANY_SOURCE)
+          while(1)
           {
-            for (GraphElem k = 0; k < count;)
+            if (rbuf_[p*bufsize_+k] == -1)
             {
-              if (rbuf_[p*bufsize_+k] == -1)
+              k += 1;
+              prev = k;
+              continue;
+            }
+
+            tup[0] = rbuf_[p*bufsize_+k];
+            GraphElem curr_count = 0;
+
+            for (GraphElem m = k + 1;; m++)
+            {
+              if (rbuf_[p*bufsize_+m] == -1)
               {
-                k += 1;
-                prev = k;
-                continue;
+                curr_count = m + 1;
+                break;
               }
 
-              tup[0] = rbuf_[p*bufsize_+k];
-              GraphElem curr_count = 0;
-
-              for (GraphElem m = k + 1; m < count; m++)
-              {
-                if (rbuf_[p*bufsize_+m] == -1)
-                {
-                  curr_count = m + 1;
-                  break;
-                }
-
-                tup[1] = rbuf_[p*bufsize_+m];
+              tup[1] = rbuf_[p*bufsize_+m];
 
 #if defined(USE_OPENMP) && defined(USE_OPENMP_NESTED)
-                if (check_edgelist_omp(tup))
+              if (check_edgelist_omp(tup))
 #elif defined(FAST_CHECK_EDGELIST)
                 if (fast_check_edgelist(tup))
 #else
-                if (check_edgelist(tup))
+                  if (check_edgelist(tup))
 #endif
-                  ntriangles_ += 1;
-                
-                in_nghosts_ -= 1;
-                recv_count_[source] -= 1;
-              }
+                    ntriangles_ += 1;
 
-              k += (curr_count - prev);
-              prev = k;
+              in_nghosts_ -= 1;
+              recv_count_[source] -= 1;
             }
+
+            k += (curr_count - prev);
+            prev = k;
           }
-          rbuf_[p*bufsize_] = -999; 
+
+          for (GraphElem t = 0; t < bufsize_; t++)
+            rbuf_[p*bufsize_ + t] = -999; 
         }
       }
     }
