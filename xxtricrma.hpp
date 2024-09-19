@@ -37,8 +37,8 @@
 //
 // ************************************************************************ 
 #pragma once
-#ifndef XXTRIC_HPP
-#define XXTRIC_HPP
+#ifndef XXTRICRMA_HPP
+#define XXTRICRMA_HPP
 
 #include "graph.hpp"
 
@@ -52,20 +52,16 @@
 #include <stdexcept>
 #include <string> 
 
-#ifndef TAG_DATA
-#define TAG_DATA  (100)
-#endif
-
 class TriangleCounting
 {
   public:
 
     TriangleCounting(Graph* g, const GraphElem bufsize): 
-      g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), 
+      g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr),
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
-      recv_count_(nullptr), rindex_(0), rdegree_(0)
+      prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), tdisp_(nullptr),
+      recv_count_(nullptr), rindex_(0), rdegree_(0), nwin_(MPI_WIN_NULL), dwin_(MPI_WIN_NULL)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -206,24 +202,32 @@ class TriangleCounting
 
     if (rank_ == 0)
       std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
- 
-    sbuf_     = new GraphElem[pdegree_*bufsize_];
+
+    MPI_Win_allocate(rdegree_*bufsize_*sizeof(GraphElem), sizeof(GraphElem), MPI_INFO_NULL, comm_, &rbuf_, &win_);
+    MPI_Win_lock_all(MPI_MODE_NOCHECK, win_);
+    
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
-    sreq_     = new MPI_Request[pdegree_];
     stat_     = new char[pdegree_];
-    
-    rbuf_     = new GraphElem[rdegree_*bufsize_];
-    rreq_     = new MPI_Request[rdegree_];
+    sbuf_     = new GraphElem[pdegree_*bufsize_];
+    sreq_     = new MPI_Request[pdegree_];
+    tdisp_    = new GraphElem[size_]();
 
-    std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
+    for (GraphElem k = 0; k < rdegree_; k+=bufsize_)
+      rbuf_[k] = -999;
+
+    std::fill(send_count, send_count + size_, 0);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
     std::fill(prev_m_, prev_m_ + pdegree_, -1);
     std::fill(stat_, stat_ + pdegree_, '0');
+    std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
     
-    std::fill(rreq_, rreq_ + rdegree_, MPI_REQUEST_NULL);
-
+    for (int i = 0; i < rdegree_; i++)
+      send_count[sources_[i]] = rindex_[sources_[i]];
+    
+    MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, tdisp_, 1, MPI_GRAPH_TYPE, comm_);
+    
     MPI_Barrier(comm_);
 
 #if defined(DEBUG_PRINTF)
@@ -243,16 +247,18 @@ class TriangleCounting
     void clear()
     {
       delete []sbuf_;
-      delete []rbuf_;
       delete []recv_count_;
       delete []sbuf_ctr_;
-      delete []sreq_;
-      delete []rreq_;
       delete []prev_k_;
       delete []prev_m_;
       delete []stat_;
+      delete []sreq_;
       delete []vcount_;
       delete []erange_;
+      delete []tdisp_;
+
+      MPI_Win_unlock_all(win_);
+      MPI_Win_free(&win_);
 
       pindex_.clear();
       targets_.clear();
@@ -260,41 +266,24 @@ class TriangleCounting
       sources_.clear();
     }
 
-    inline void nbsend(int owner)
+    inline void rput(int owner)
     {
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
-        MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
-            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+        MPI_Rput(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, 
+            owner, tdisp_[rank_]*bufsize_, sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, win_, 
+            &sreq_[pindex_[owner]]);
         stat_[pindex_[owner]] = '1'; 
       }
     }
 
-    inline void nbsend()
+    inline void rput()
     {
 #if defined(USE_OPENMP)
 #pragma omp parallel for default(shared)
 #endif
       for (int p = 0; p < pdegree_; p++)
-        nbsend(targets_[p]);
-    }
-
-    inline void nbrecv(int source)
-    {
-        if (recv_count_[source] > 0)
-        {
-          MPI_Irecv(&rbuf_[rindex_[source]*bufsize_], bufsize_, 
-              MPI_GRAPH_TYPE, source, TAG_DATA, comm_, &rreq_[rindex_[source]]);
-        }
-    }
-
-    inline void nbrecv()
-    {
-#if defined(USE_OPENMP) 
-#pragma omp parallel for default(shared)
-#endif
-      for (int p = 0; p < rdegree_; p++)
-        nbrecv(sources_[p]);
+        rput(targets_[p]);
     }
     
     inline void lookup_edges()
@@ -336,7 +325,7 @@ class TriangleCounting
                 prev_m_[pidx] = m;
                 prev_k_[pidx] = -1;
 
-                nbsend(owner);
+                rput(owner);
 
                 continue;
               }
@@ -359,7 +348,7 @@ class TriangleCounting
                   sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
                   sbuf_ctr_[pidx] += 1;
 
-                  nbsend(owner);
+                  rput(owner);
 
                   break;
                 }
@@ -386,7 +375,7 @@ class TriangleCounting
                   sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
                   sbuf_ctr_[pidx] += 1;
 
-                  nbsend(owner);
+                  rput(owner);
                 }
                 else
                 {
@@ -503,26 +492,19 @@ class TriangleCounting
         return true;
       return false;
     }
-   
-#if defined(USE_OPENMP)
-    inline void process_recvs()
-#else
-    inline void process_recvs(int* rinds, MPI_Status* rstatuses)
-#endif
+
+    inline void process_window()
     {
       if (in_nghosts_ == 0)
         return;
 
 #if defined(USE_OPENMP)
 #pragma omp parallel for default(shared) reduction(+:ntriangles_) reduction(-:in_nghosts_)
+#else
+#endif
       for (int p = 0; p < rdegree_; p++)
       {
-        int over = -1;
-        MPI_Status status;
-
-        MPI_Test(&rreq_[p], &over, &status);
-
-        if (over)
+        if (rbuf_[p*bufsize_] != -999)
         { 
           GraphElem tup[2] = {-1,-1}, prev = 0;
           int count = 0;
@@ -555,7 +537,7 @@ class TriangleCounting
 
                 tup[1] = rbuf_[p*bufsize_+m];
 
-#if defined(USE_OPENMP_NESTED)
+#if defined(USE_OPENMP) && defined(USE_OPENMP_NESTED)
                 if (check_edgelist_omp(tup))
 #elif defined(FAST_CHECK_EDGELIST)
                 if (fast_check_edgelist(tup))
@@ -571,69 +553,10 @@ class TriangleCounting
               k += (curr_count - prev);
               prev = k;
             }
-
-           nbrecv(source);
-          
           }
+          rbuf_[p*bufsize_] = -999; 
         }
       }
-#else
-      int over = -1;
-      MPI_Testsome(rdegree_, rreq_, &over, rinds, rstatuses);
-
-      for (int i = 0; i < over; i++)
-      {
-        GraphElem tup[2] = {-1,-1}, prev = 0;
-        const int idx = rinds[i];
-
-        int count = 0;
-        const int source = rstatuses[i].MPI_SOURCE;
-        MPI_Get_count(&rstatuses[i], MPI_GRAPH_TYPE, &count);
-
-        if (source != MPI_ANY_SOURCE)
-        {
-          for (GraphElem k = 0; k < count;)
-          {
-            if (rbuf_[idx*bufsize_+k] == -1)
-            {
-              k += 1;
-              prev = k;
-              continue;
-            }
-
-            tup[0] = rbuf_[idx*bufsize_+k];
-            GraphElem curr_count = 0;
-
-            for (GraphElem m = k + 1; m < count; m++)
-            {
-              if (rbuf_[idx*bufsize_+m] == -1)
-              {
-                curr_count = m + 1;
-                break;
-              }
-
-              tup[1] = rbuf_[idx*bufsize_+m];
-
-#if defined(FAST_CHECK_EDGELIST)
-                if (fast_check_edgelist(tup))
-#else
-                if (check_edgelist(tup))
-#endif
-                  ntriangles_ += 1;
-              
-              in_nghosts_ -= 1;
-              recv_count_[source] -= 1;
-            }
-
-            k += (curr_count - prev);
-            prev = k;
-          }
-
-          nbrecv(source);
-
-        }
-      }
-#endif
     }
 
     inline GraphElem count()
@@ -646,29 +569,18 @@ class TriangleCounting
 #endif
 
       int* inds = new int[pdegree_]();
-#if defined(USE_OPENMP)
-#else
-      int* rinds = new int[rdegree_]();
-      MPI_Status* rstatuses = new MPI_Status[rdegree_]();
-#endif      
       int over = -1;
       
-      nbrecv();
-
 #if defined(USE_ALLREDUCE_FOR_EXIT)
       while(1)
 #else
       while(!done)
 #endif
       {
-#if defined(USE_OPENMP)
-        process_recvs();
-#else
-        process_recvs(rinds, rstatuses);
-#endif
+        process_window();
 
         if (out_nghosts_ == 0)
-          nbsend();
+          rput();
         else
           lookup_edges();
         
@@ -678,6 +590,8 @@ class TriangleCounting
         {
           sbuf_ctr_[inds[i]] = 0;
           stat_[inds[i]] = '0';
+          
+          MPI_Win_flush(targets_[inds[i]], win_);
         }
 
 #if defined(USE_ALLREDUCE_FOR_EXIT)
@@ -711,11 +625,7 @@ class TriangleCounting
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
       
       delete []inds;
-#if defined(USE_OPENMP)
-#else
-      delete []rinds;
-      delete []rstatuses;
-#endif
+
       return ttc;
     }
 
@@ -723,14 +633,15 @@ class TriangleCounting
     Graph* g_;
 
     GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_;
-    GraphElem *sbuf_, *rbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
-    MPI_Request *sreq_, *rreq_;
+    GraphElem *sbuf_, *rbuf_, *tdisp_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     char *stat_;
+    MPI_Request *sreq_;
     
     std::vector<int> targets_, sources_;
     int rank_, size_;
     std::unordered_map<int, int> pindex_, rindex_; 
 
     MPI_Comm comm_;
+    MPI_Win win_;
 };
 #endif
