@@ -205,7 +205,10 @@ class TriangleCounting
 
     MPI_Win_allocate(rdegree_*bufsize_*sizeof(GraphElem), sizeof(GraphElem), MPI_INFO_NULL, comm_, &rbuf_, &win_);
     MPI_Win_lock_all(MPI_MODE_NOCHECK, win_);
-    
+     
+    for (GraphElem k = 0; k < rdegree_; k+=bufsize_)
+      rbuf_[k] = -999;
+
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
@@ -213,9 +216,6 @@ class TriangleCounting
     sbuf_     = new GraphElem[pdegree_*bufsize_];
     sreq_     = new MPI_Request[pdegree_];
     tdisp_    = new GraphElem[size_]();
-
-    for (GraphElem k = 0; k < rdegree_; k+=bufsize_)
-      rbuf_[k] = -999;
 
     std::fill(send_count, send_count + size_, 0);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
@@ -511,6 +511,9 @@ class TriangleCounting
 
           while(1)
           {
+            if (rbuf_[p*bufsize_+k] == -999)
+              break;
+
             if (rbuf_[p*bufsize_+k] == -1)
             {
               k += 1;
@@ -548,6 +551,7 @@ class TriangleCounting
             prev = k;
           }
 
+          // reset window buffer
           for (GraphElem t = 0; t < bufsize_; t++)
             rbuf_[p*bufsize_ + t] = -999; 
         }
