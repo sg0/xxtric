@@ -217,12 +217,12 @@ class TriangleCounting
     sreq_     = new MPI_Request[pdegree_];
     tdisp_    = new GraphElem[size_]();
 
-    std::fill(send_count, send_count + size_, 0);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
     std::fill(prev_m_, prev_m_ + pdegree_, -1);
     std::fill(stat_, stat_ + pdegree_, '0');
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
     
+    std::fill(send_count, send_count + size_, 0);
     for (int i = 0; i < rdegree_; i++)
       send_count[sources_[i]] = rindex_[sources_[i]];
     
@@ -506,10 +506,11 @@ class TriangleCounting
       {
         if (rbuf_[p*bufsize_] != -999)
         { 
-          GraphElem tup[2] = {-1,-1}, prev = 0, k = 0;
+          GraphElem tup[2] = {-1,-1}, prev = 0;
           const int source = sources_[p];
+          bool done = false;
 
-          while(1)
+          for (GraphElem k = 0; k < bufsize_ && !done;)
           {
             if (rbuf_[p*bufsize_+k] == -999)
               break;
@@ -524,8 +525,14 @@ class TriangleCounting
             tup[0] = rbuf_[p*bufsize_+k];
             GraphElem curr_count = 0;
 
-            for (GraphElem m = k + 1;; m++)
+            for (GraphElem m = k + 1; m < bufsize_; m++)
             {
+              if (rbuf_[p*bufsize_+m] == -999)
+              {
+                done = true;
+                break;
+              }
+
               if (rbuf_[p*bufsize_+m] == -1)
               {
                 curr_count = m + 1;
