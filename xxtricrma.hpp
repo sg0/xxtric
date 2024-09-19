@@ -206,9 +206,8 @@ class TriangleCounting
     MPI_Win_allocate(rdegree_*bufsize_*sizeof(GraphElem), sizeof(GraphElem), MPI_INFO_NULL, comm_, &rbuf_, &win_);
     MPI_Win_lock_all(MPI_MODE_NOCHECK, win_);
      
-    for (GraphElem k = 0; k < rdegree_; k+=bufsize_)
-      rbuf_[k] = -999;
-
+    std::fill(rbuf_, rbuf_ + rdegree_*bufsize_, -999);
+    
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
@@ -217,15 +216,20 @@ class TriangleCounting
     sreq_     = new MPI_Request[pdegree_];
     tdisp_    = new GraphElem[size_]();
 
+    std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
     std::fill(prev_m_, prev_m_ + pdegree_, -1);
     std::fill(stat_, stat_ + pdegree_, '0');
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
-    
+ 
     std::fill(send_count, send_count + size_, 0);
+    GraphElem rdisp = 0; 
     for (int i = 0; i < rdegree_; i++)
-      send_count[sources_[i]] = rindex_[sources_[i]];
-    
+    {
+      send_count[sources_[i]] = rdisp;
+      rdisp += rindex_[sources_[i]]*bufsize_;
+    }
+   
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, tdisp_, 1, MPI_GRAPH_TYPE, comm_);
     
     MPI_Barrier(comm_);
@@ -271,7 +275,7 @@ class TriangleCounting
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
         MPI_Rput(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, 
-            owner, tdisp_[rank_]*bufsize_, sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, win_, 
+            owner, tdisp_[rank_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, win_, 
             &sreq_[pindex_[owner]]);
         stat_[pindex_[owner]] = '1'; 
       }
@@ -559,8 +563,7 @@ class TriangleCounting
           }
 
           // reset window buffer
-          for (GraphElem t = 0; t < bufsize_; t++)
-            rbuf_[p*bufsize_ + t] = -999; 
+          std::fill(rbuf_ + p*bufsize_, rbuf_ + p*bufsize_ + bufsize_, -999);
         }
       }
     }
