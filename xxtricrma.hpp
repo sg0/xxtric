@@ -61,7 +61,7 @@ class TriangleCounting
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), tdisp_(nullptr),
-      recv_count_(nullptr), rindex_(0), rdegree_(0), win_(MPI_WIN_NULL)
+      recv_count_(nullptr), rstat_(nullptr), rindex_(0), rdegree_(0), win_(MPI_WIN_NULL)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -212,6 +212,7 @@ class TriangleCounting
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
     stat_     = new char[pdegree_];
+    rstat_    = new char[rdegree_];
     sbuf_     = new GraphElem[pdegree_*bufsize_];
     sreq_     = new MPI_Request[pdegree_];
     tdisp_    = new GraphElem[size_]();
@@ -220,14 +221,16 @@ class TriangleCounting
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
     std::fill(prev_m_, prev_m_ + pdegree_, -1);
     std::fill(stat_, stat_ + pdegree_, '0');
+    std::fill(rstat_, rstat_ + rdegree_, '0');
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
- 
+
+    // TODO FIXME use neighbor collectives instead 
     std::fill(send_count, send_count + size_, 0);
-    GraphElem rdisp = 0; 
-    for (int i = 0; i < rdegree_; i++)
+    GraphElem disp = 0;
+    for (int i = 0; i < pdegree_; i++)
     {
-      send_count[sources_[i]] = rdisp;
-      rdisp += rindex_[sources_[i]]*bufsize_;
+      send_count[targets_[i]] = disp;
+      disp += bufsize_;
     }
    
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, tdisp_, 1, MPI_GRAPH_TYPE, comm_);
@@ -256,6 +259,7 @@ class TriangleCounting
       delete []prev_k_;
       delete []prev_m_;
       delete []stat_;
+      delete []rstat_;
       delete []sreq_;
       delete []vcount_;
       delete []erange_;
@@ -275,7 +279,7 @@ class TriangleCounting
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
         MPI_Rput(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, 
-            owner, tdisp_[rank_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, win_, 
+            owner, tdisp_[owner], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, win_, 
             &sreq_[pindex_[owner]]);
         stat_[pindex_[owner]] = '1'; 
       }
@@ -499,6 +503,8 @@ class TriangleCounting
 
     inline void process_window()
     {
+      MPI_Barrier(comm_);
+
       if (in_nghosts_ == 0)
         return;
 
@@ -508,13 +514,14 @@ class TriangleCounting
 #endif
       for (int p = 0; p < rdegree_; p++)
       {
-        if (rbuf_[p*bufsize_] != -999)
-        { 
-          GraphElem tup[2] = {-1,-1}, prev = 0;
-          const int source = sources_[p];
+        GraphElem tup[2] = {-1,-1}, prev = 0, k = 0;
+        const int source = sources_[p];
+
+        if (rbuf_[p*bufsize_] != -999 && recv_count_[source] > 0)
+        {
           bool done = false;
 
-          for (GraphElem k = 0; k < bufsize_ && !done;)
+          while (!done)
           {
             if (rbuf_[p*bufsize_+k] == -999)
               break;
@@ -529,7 +536,7 @@ class TriangleCounting
             tup[0] = rbuf_[p*bufsize_+k];
             GraphElem curr_count = 0;
 
-            for (GraphElem m = k + 1; m < bufsize_; m++)
+            for (GraphElem m = k + 1;; m++)
             {
               if (rbuf_[p*bufsize_+m] == -999)
               {
@@ -563,7 +570,8 @@ class TriangleCounting
           }
 
           // reset window buffer
-          std::fill(rbuf_ + p*bufsize_, rbuf_ + p*bufsize_ + bufsize_, -999);
+          if (recv_count_[source] > 0)
+            std::fill(rbuf_ + p*bufsize_, rbuf_ + p*bufsize_ + bufsize_, -999);
         }
       }
     }
@@ -643,7 +651,7 @@ class TriangleCounting
 
     GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_;
     GraphElem *sbuf_, *rbuf_, *tdisp_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
-    char *stat_;
+    char *stat_, *rstat_;
     MPI_Request *sreq_;
     
     std::vector<int> targets_, sources_;
