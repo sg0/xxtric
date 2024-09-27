@@ -506,7 +506,7 @@ class TriangleCounting
         GraphElem tup[2] = {-1,-1}, prev = 0, k = 0;
         const int source = sources_[p];
 
-        if (recv_count_[source] > 0)
+        if ((rbuf_[p*bufsize_] != -999) && (recv_count_[source] > 0))
         {
           bool done = false;
 
