@@ -56,7 +56,9 @@
 #include <omp.h>
 #endif
 
-#if defined(USE_MPI_RMA)
+#if defined(USE_MPI_RMA_PASSIVE)
+#include "xxtricrma2.hpp"
+#elif defined(USE_MPI_RMA)
 #include "xxtricrma.hpp"
 #else
 #include "xxtric.hpp"
