@@ -595,13 +595,10 @@ class TriangleCounting
 
         for (int i = 0; i < over; i++)
         {
-          if (stat_[inds[i]] == '1')
-          {
-            sbuf_ctr_[inds[i]] = 0;
-            stat_[inds[i]] = '0';
+          sbuf_ctr_[inds[i]] = 0;
+          stat_[inds[i]] = '0';
 
-            MPI_Win_flush(targets_[inds[i]], win_);
-          }
+          MPI_Win_flush(targets_[inds[i]], win_);
         }
 
         count = in_nghosts_;
