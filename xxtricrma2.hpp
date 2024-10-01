@@ -519,6 +519,9 @@ class TriangleCounting
 
           while (!done)
           {
+            if (k >= bufsize_)
+              break;
+
             if (rbuf_[p*bufsize_+k] == -999)
               break;
 
@@ -532,7 +535,7 @@ class TriangleCounting
             tup[0] = rbuf_[p*bufsize_+k];
             GraphElem curr_count = 0;
 
-            for (GraphElem m = k + 1;; m++)
+            for (GraphElem m = k + 1; m < bufsize_; m++)
             {
               if (rbuf_[p*bufsize_+m] == -999)
               {
@@ -587,15 +590,18 @@ class TriangleCounting
           rput();
         else
           lookup_edges();
-        
+
         MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
 
         for (int i = 0; i < over; i++)
         {
-          sbuf_ctr_[inds[i]] = 0;
-          stat_[inds[i]] = '0';
-          
-          MPI_Win_flush(targets_[inds[i]], win_);
+          if (stat_[inds[i]] == '1')
+          {
+            sbuf_ctr_[inds[i]] = 0;
+            stat_[inds[i]] = '0';
+
+            MPI_Win_flush(targets_[inds[i]], win_);
+          }
         }
 
         count = in_nghosts_;

@@ -512,6 +512,9 @@ class TriangleCounting
 
           while (!done)
           {
+            if (k >= bufsize_)
+              break;
+
             if (rbuf_[p*bufsize_+k] == -999)
               break;
 
@@ -560,7 +563,7 @@ class TriangleCounting
 
           // reset window buffer
           if (recv_count_[source] > 0)
-              std::fill(&rbuf_[p*bufsize_], &rbuf_[p*bufsize_] + bufsize_, -999);
+            std::fill(&rbuf_[p*bufsize_], &rbuf_[p*bufsize_] + bufsize_, -999);
         }
       }
     }
