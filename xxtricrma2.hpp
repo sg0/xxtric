@@ -278,7 +278,8 @@ class TriangleCounting
       {
         MPI_Rput(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, 
             owner, tdisp_[owner], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, win_, 
-            &sreq_[pindex_[owner]]);
+            &sreq_[pindex_[owner]]);        
+        
         stat_[pindex_[owner]] = '1'; 
       }
     }
@@ -584,8 +585,6 @@ class TriangleCounting
       
       while(1)
       {
-        process_window();
-
         if (out_nghosts_ == 0)
           rput();
         else
@@ -601,6 +600,10 @@ class TriangleCounting
           MPI_Win_flush(targets_[inds[i]], win_);
         }
 
+        MPI_Barrier(comm_);
+
+        process_window();
+        
         count = in_nghosts_;
         MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
         if (count == 0)
