@@ -1,7 +1,7 @@
 CXX = mpicxx
 DBGFLAGS = -g -fomit-frame-pointer
 #OPTFLAGS = $(DBGFLAGS) -O3 -DPRINT_EXTRA_NEDGES #-DDEBUG_PRINTF   
-OPTFLAGS = -Ofast -DFAST_CHECK_EDGELIST -DPRINT_EXTRA_NEDGES #-DDEBUG_PRINTF   
+OPTFLAGS = -Ofast -DFAST_CHECK_EDGELIST -DPRINT_EXTRA_NEDGES #-DUSE_SHMEM_ORDER #-DUSE_SHMEM_ORDER -DUSE_SHMEM_SIGNAL -DUSE_MPI_RMA_PASSIVE#-DDEBUG_PRINTF   
 # -DPRINT_EXTRA_NEDGES prints extra edges when -p <> is passed to 
 #  add extra edges randomly on a generated graph
 # use export ASAN_OPTIONS=verbosity=1 to check ASAN output
@@ -14,6 +14,12 @@ TARGET = tric
 ENABLE_OPENMP=0
 ifeq ($(ENABLE_OPENMP),1)
 CXXFLAGS += -fopenmp -DUSE_OPENMP
+endif
+
+ENABLE_SHMEM=0
+CXX = CC
+ifeq ($(ENABLE_SHMEM), 1)
+LDFLAGS += -L/opt/cray/pe/pmi/6.1.11/lib -lpmi -lpmi2 
 endif
 
 ENABLE_TAUPROF=0
@@ -29,7 +35,7 @@ all: $(TARGET)
 	$(CXX) $(INCLUDE) $(CXXFLAGS) -c -o $@ $^
 
 $(TARGET):  $(OBJ)
-	$(CXX) $(CXXFLAGS) -o $@ $^ 
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ 
 
 .PHONY: clean
 

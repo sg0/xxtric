@@ -603,7 +603,7 @@ class TriangleCounting
         MPI_Barrier(comm_);
 
         process_window();
-        
+
         count = in_nghosts_;
         MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
         if (count == 0)
