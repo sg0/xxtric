@@ -58,7 +58,7 @@ class TriangleCounting
 
     TriangleCounting(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr),
-      pdegree_(0), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
+      pdegree_(0), max_pdegree_(0), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), tdisp_(nullptr),
       recv_count_(nullptr), rindex_(0), rdegree_(0)
@@ -191,6 +191,34 @@ class TriangleCounting
       
     pdegree_ = targets_.size();
     rdegree_ = sources_.size();
+    
+    MPI_Allreduce(&pdegree_, &max_pdegree_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
+
+    std::vector<GraphElem> pe_list, pe_map, pe_list_nodup;
+    std::vector<int> rcounts, rdispls;
+
+    rcounts.resize(size_, 0);
+    rdispls.resize(size_, 0);
+
+    MPI_Allgather((int*)&pdegree_, 1, MPI_INT, rcounts.data(), 1, MPI_INT, comm_);
+
+                pe_map.resize(size_, 0);
+                
+                int idx = 0;
+                for (int i = 0; i < size_; i++)
+                {
+                    rdispls[i] = idx;
+                    idx += rcounts[i];
+                }
+                
+                pe_list.resize(idx, 0);
+
+            MPI_Barrier(comm_);
+
+            MPI_Gatherv(nbr_pes.data(), nbr_pes_size, MPI_GRAPH_TYPE, 
+                    pe_list.data(), rcounts.data(), rdispls.data(), 
+                    MPI_GRAPH_TYPE, 0, comm_);
+
 
     for (int i = 0; i < pdegree_; i++)
       pindex_.insert({targets_[i], i});
@@ -207,7 +235,7 @@ class TriangleCounting
     if (rank_ == 0)
       std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
 
-    rbuf_ = (GraphElem *)shmem_malloc(rdegree_*bufsize_*sizeof(GraphElem));
+    rbuf_ = (GraphElem *)shmem_malloc(max_pdegree_*bufsize_*sizeof(GraphElem));
     std::fill(rbuf_, rbuf_ + rdegree_*bufsize_, -999);
     
     sbuf_ctr_ = new GraphElem[pdegree_]();
@@ -275,7 +303,8 @@ class TriangleCounting
     {
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
-        shmem_int64_put_nbi(&rbuf_[tdisp_[owner]], &sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], owner);    
+        //shmem_int64_put_nbi(&rbuf_[tdisp_[owner]], &sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], owner);    
+        shmem_int64_put_nbi(&rbuf_[rindex_[owner]*bufsize_], &sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], owner);    
         stat_[pindex_[owner]] = '1'; 
       }
     }
@@ -617,7 +646,7 @@ class TriangleCounting
   private:
     Graph* g_;
 
-    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_;
+    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_, max_pdegree_;
     GraphElem *sbuf_, *rbuf_, *tdisp_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     char *stat_;
     
