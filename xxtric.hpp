@@ -106,6 +106,70 @@ class TriangleCounting
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
+#if defined(USE_OPENMP)
+    GraphElem *tcount = new GraphElem[lnv];
+    std::memset(tcount, 0, sizeof(GraphElem)*lnv);
+#pragma omp parallel for schedule(dynamic) default(shared)
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1, tup[2];
+
+      g_->edge_range(i, e0, e1);
+      const GraphElem global_i = g_->local_to_global(i);
+
+      if ((e0 + 1) == e1)
+        continue;
+
+      for (GraphElem m = e0; m < e1-1; m++)
+      {
+        Edge const& edge_m = g_->get_edge(m);
+        const int owner = g_->get_owner(edge_m.tail_);
+        tup[0] = edge_m.tail_;
+
+        if (global_i > tup[0])
+          continue;
+
+        if (owner == rank_)
+        {
+          for (GraphElem n = m + 1; n < e1; n++)
+          {
+            Edge const& edge_n = g_->get_edge(n);
+            tup[1] = edge_n.tail_;
+#if defined(FAST_CHECK_EDGELIST)
+            if (fast_check_edgelist(tup))
+#else
+              if (check_edgelist(tup))
+#endif
+              {
+                tcount[i] += 1;
+              }
+          }
+        }
+        else
+        {
+          if (owner > rank_)
+          {
+            for (GraphElem n = m + 1; n < e1; n++)
+            {
+              Edge const& edge_n = g_->get_edge(n);
+
+              if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+                break;
+
+              if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+                continue;
+
+#pragma omp atomic update
+              send_count[owner] += 1;
+              vcount_[i] += 1;
+            }
+          }
+        }
+      }
+    }
+    ntriangles_ = std::accumulate(tcount, tcount + lnv, 0);
+    free(tcount);
+#else
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];
@@ -161,6 +225,7 @@ class TriangleCounting
         }
       }
     }
+#endif
 
     MPI_Barrier(comm_);
         
