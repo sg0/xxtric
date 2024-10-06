@@ -243,14 +243,16 @@ class TriangleCounting
     MPI_Barrier(comm_);
         
     double t1 = MPI_Wtime();
-    double p_tot = t1 - t0, t_tot = 0.0;
+    double p_tot = t1 - t0, t_tot = 0.0, t_max = 0.0, t_min = 0.0;
 
     MPI_Reduce(&p_tot, &t_tot, 1, MPI_DOUBLE, MPI_SUM, 0, comm_);
+    MPI_Reduce(&p_tot, &t_max, 1, MPI_DOUBLE, MPI_MAX, 0, comm_);
+    MPI_Reduce(&p_tot, &t_min, 1, MPI_DOUBLE, MPI_MIN, 0, comm_);
 
     if (rank_ == 0) 
     {   
-      std::cout << "Average time for local counting during instantiation (secs.): " 
-        << ((double)(t_tot / (double)size_)) << std::endl;
+      std::cout << "Avg/Min/Max times for local counting during instantiation (secs.): " 
+        << ((double)(t_tot / (double)size_)) << ", " << t_min << ", " << t_max << std::endl;
     }
 
     t0 = MPI_Wtime();

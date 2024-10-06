@@ -192,27 +192,29 @@ int main(int argc, char *argv[])
   GraphElem ntris = tr.count();
   MPI_Barrier(MPI_COMM_WORLD);
   t1 = MPI_Wtime();
-  double p_tot = t1 - t0, t_tot = 0.0;
+  double p_tot = t1 - t0, t_tot = 0.0, t_max = 0.0, t_min = 0.0;
 
-  MPI_Reduce(&p_tot, &t_tot, 1, MPI_DOUBLE, 
-      MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&p_tot, &t_tot, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&p_tot, &t_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&p_tot, &t_min, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
+
   if (me == 0) 
   {   double avg_t = (double)(t_tot/(double)nprocs);
 #if defined(USE_MPI_RMA)
-    std::cout << "Average execution time (secs.) for distributed counting (using MPI RMA Fence) on " << nprocs << " processes: " 
-      << avg_t << std::endl;
+    std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using MPI RMA Fence) on " << nprocs << " processes: " 
+      << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #elif defined(USE_MPI_RMA_PASSIVE)
-    std::cout << "Average execution time (secs.) for distributed counting (using MPI RMA Passive) on " << nprocs << " processes: " 
-      << avg_t << std::endl;
+    std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using MPI RMA Passive) on " << nprocs << " processes: " 
+      << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #elif defined(USE_SHMEM_ORDER)
-    std::cout << "Average execution time (secs.) for distributed counting (using SHMEM ordered) on " << nprocs << " processes: " 
-      << avg_t << std::endl;
+    std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using SHMEM ordered) on " << nprocs << " processes: " 
+      << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #elif defined(USE_SHMEM_SIGNAL)
-    std::cout << "Average execution time (secs.) for distributed counting (using SHMEM signal) on " << nprocs << " processes: " 
-      << avg_t << std::endl;
+    std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using SHMEM signal) on " << nprocs << " processes: " 
+      << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #else
-    std::cout << "Average execution time (secs.) for distributed counting on " << nprocs << " processes: " 
-      << avg_t << std::endl;
+    std::cout << "Avg/Min/Max execution time (secs.) for distributed counting on " << nprocs << " processes: " 
+      << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #endif
 
     std::cout << "User initialized per-PE buffer count: " << bufferSize << std::endl;
