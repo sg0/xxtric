@@ -190,10 +190,10 @@ int main(int argc, char *argv[])
 
   t0 = MPI_Wtime();
   GraphElem ntris = tr.count();
-  MPI_Barrier(MPI_COMM_WORLD);
   t1 = MPI_Wtime();
   double p_tot = t1 - t0, t_tot = 0.0, t_max = 0.0, t_min = 0.0;
 
+  MPI_Barrier(MPI_COMM_WORLD);
   MPI_Reduce(&p_tot, &t_tot, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
   MPI_Reduce(&p_tot, &t_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   MPI_Reduce(&p_tot, &t_min, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
