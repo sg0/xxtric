@@ -429,6 +429,30 @@ class BinaryEdgeList
             return g;
         }
 
+        void linear_partitioning_num_edges(int nprocs, std::string file, std::vector<GraphElem>& mbins)
+        {
+          FILE *fp;
+          GraphElem nv, ne; // #vertices, #edges
+
+          fp = fopen(file.c_str(), "rb");
+          if (fp == NULL) 
+          {
+            std::cout<< " Error opening file! " << std::endl;
+            return;
+          }
+
+          // read nv and ne
+          fread(&nv, sizeof(GraphElem), 1, fp);
+          fread(&ne, sizeof(GraphElem), 1, fp);
+
+          std::vector<GraphElem> ecount(nv, 0);
+
+          fread(ecount.data(), sizeof(GraphElem), nv, fp);
+          fclose(fp);
+
+          linear_partition(ecount.data(), nv, nprocs, mbins.data());
+        }
+
         // find a distribution such that every 
         // process own equal number of edges (serial)
         void find_balanced_num_edges(int nprocs, std::string file, std::vector<GraphElem>& mbins)
@@ -449,16 +473,18 @@ class BinaryEdgeList
             fread(&ne, sizeof(GraphElem), 1, fp);
           
             // bin capacity
-            GraphElem nbcap = (ne / nprocs), ecount_idx, past_ecount_idx = 0;
+            GraphElem nbcap = (ne / nprocs), past_ecount_idx = 0;
+            std::vector<GraphElem> ecount_idx(nv, 0);
             int p = 0;
+                
+            fread(ecount_idx.data(), sizeof(GraphElem), nv, fp);
+            fclose(fp);
 
             for (GraphElem m = 0; m < nv; m++)
             {
-                fread(&ecount_idx, sizeof(GraphElem), 1, fp);
-               
                 // bins[p] >= capacity only for the last process
                 if ((nbins[p] < nbcap) || (p == (nprocs - 1)))
-                    nbins[p] += (ecount_idx - past_ecount_idx);
+                    nbins[p] += (ecount_idx[m] - past_ecount_idx);
 
                 // increment p as long as p is not the last process
                 // worst case: excess edges piled up on (p-1)
@@ -466,22 +492,22 @@ class BinaryEdgeList
                     p++;
 
                 mbins[p+1]++;
-                past_ecount_idx = ecount_idx;
+                past_ecount_idx = ecount_idx[m];
             }
             
-            fclose(fp);
-
             // prefix sum to store indices 
             for (int k = 1; k < nprocs+1; k++)
                 mbins[k] += mbins[k-1]; 
             
             nbins.clear();
+            ecount_idx.clear();
         }
-        
+
+
         // read a file and return a graph
         // uses a balanced distribution
         // (approximately equal #edges per process) 
-        Graph* read_balanced(int me, int nprocs, int ranks_per_node, std::string file)
+        Graph* read_balanced(int me, int nprocs, int ranks_per_node, std::string file, short static_or_dyn = 0)
         {
             int file_open_error;
             MPI_File fh;
@@ -492,9 +518,18 @@ class BinaryEdgeList
             // each process roughly owns equal #edges
             if (me == 0)
             {
+              if (!static_or_dyn)
+              {
                 find_balanced_num_edges(nprocs, file, mbins);
                 std::cout << "Trying to achieve equal edge distribution across processes." << std::endl;
+              }
+              else
+              {
+                linear_partitioning_num_edges(nprocs, file, mbins);
+                std::cout << "Trying to achieve equal edge distribution across processes via dynamic programming (linear partitioning)." << std::endl;
+              }
             }
+
             MPI_Barrier(comm_);
             MPI_Bcast(mbins.data(), nprocs+1, MPI_GRAPH_TYPE, 0, comm_);
 

@@ -122,6 +122,99 @@ GraphElem reseeder(unsigned initseed)
     return (GraphElem)seeds[0];
 }
 
+// Linear partitioning from Skiena's book (n-elements into k-parts)
+// https://stackoverflow.com/questions/7938809/how-to-understand-the-dynamic-programming-solution-in-linear-partitioning
+void linear_partition_table(GraphElem* seq, GraphElem n, GraphElem k, GraphElem* table, GraphElem* sol)
+{
+    for (GraphElem i = 0; i < n; i++)
+        table[i*k] = seq[i] + ((i > 0)? table[(i-1)*k]: 0);
+    for (GraphElem j = 0; j < k; j++)
+        table[j] = seq[0];
+
+    for (GraphElem i = 1; i < n; i++)
+    {
+        for (GraphElem j = 1; j < k; j++)
+        {
+           GraphElem min = 0, minpos = -1, max = -1;
+           for (GraphElem x = 0; x < i; x++)
+           {
+               max = std::max(table[x*k+(j-1)], (table[i*k] - table[x*k]));
+               if (x == 0)
+               {
+                   min = max;
+                   minpos = 0;
+               }
+               if (max < min)
+               {
+                   min = max;
+                   minpos = x;
+               }
+           }
+           table[i*k+j] = min;
+           sol[(i-1)*(k-1)+(j-1)] = minpos;
+        }
+    }
+}
+
+// Linear partitioning from Skiena's book (n-elements into k-parts)
+void linear_partition(GraphElem* seq, GraphElem n, GraphElem k, GraphElem* bins)
+{
+    if (k <= 0)
+        return;
+    if (k > n-1)
+    {
+        std::fill(bins + 1, bins + k + 1, 1);
+        for (GraphElem j = 1; j < k+1; j++)                 
+            bins[j] += bins[j-1];
+    }
+    
+    std::vector<GraphElem> table(n*k, 0), sol((n-1)*(k-1), 0);
+    linear_partition_table(seq, n, k, table.data(), sol.data());
+
+#if defined(DEBUG_LINEAR_PARTITIONING)
+    std::cout << "Table: " << std::endl;
+    for (GraphElem i = 0; i < n; i++)
+    {
+        for (GraphElem j = 0; j < k; j++)
+        {
+            std::cout << table[i*k + j] << " "; 
+        }
+        std::cout << std::endl;
+    }
+    
+    std::cout << "Solution: " << std::endl;
+    for (GraphElem i = 0; i < n-1; i++)
+    {
+        for (GraphElem j = 0; j < k-1; j++)
+        {
+            std::cout << sol[i*(k-1) + j] << " "; 
+        }
+        std::cout << std::endl;
+    }
+#endif
+
+    const GraphElem dk = k;
+    GraphElem p = k;
+    k = k - 2;
+    n = n - 1; 
+
+    while (k >= 0)
+    {
+        for (GraphElem i = sol[(n-1)*(dk-1)+k]+1; i < n+1; i++)
+            bins[p]++;
+        
+        n = sol[(n-1)*(dk-1)+k];
+        k--;
+        p--;
+    }
+
+    for (GraphElem i = 0; i < n+1; i++)
+        bins[p]++;
+
+    for (GraphElem j = 1; j < dk+1; j++)
+        bins[j] += bins[j-1];
+}
+
 // Local random number generator 
 template<typename T, typename G = std::default_random_engine>
 T genRandom(T lo, T hi)

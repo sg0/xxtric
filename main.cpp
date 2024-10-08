@@ -79,6 +79,7 @@ static int ranksPerNode = 1;
 static GraphElem nvRGG = 0;
 static int generateGraph = 0;
 static bool readBalanced = false;
+static bool readBalancedDynamic = false;
 static GraphWeight randomEdgePercent = 0.0;
 static bool randomNumberLCG = false;
 static bool bufferSet = false;
@@ -138,7 +139,7 @@ int main(int argc, char *argv[])
   else 
   {   // read input graph
     BinaryEdgeList rm;
-    if (readBalanced == true)
+    if (readBalanced == true || readBalancedDynamic == true)
     {
       if (me == 0)
       {
@@ -146,7 +147,10 @@ int main(int argc, char *argv[])
         std::cout << "Trying to balance the edge distribution while reading: " << std::endl;
         std::cout << inputFileName << std::endl;
       }
-      g = rm.read_balanced(me, nprocs, ranksPerNode, inputFileName);
+      if (readBalanced)
+        g = rm.read_balanced(me, nprocs, ranksPerNode, inputFileName, 0);
+      else
+        g = rm.read_balanced(me, nprocs, ranksPerNode, inputFileName, 1); // use dynamic programming
     }
     else
       g = rm.read(me, nprocs, ranksPerNode, inputFileName);
@@ -240,13 +244,16 @@ void parseCommandLine(const int argc, char * const argv[])
 {
   int ret;
 
-  while ((ret = getopt(argc, argv, "f:r:n:p:olbs:")) != -1) {
+  while ((ret = getopt(argc, argv, "f:r:n:p:olbds:")) != -1) {
     switch (ret) {
       case 'f':
         inputFileName.assign(optarg);
         break;
       case 'b':
         readBalanced = true;
+        break;
+      case 'd':
+        readBalancedDynamic = true;
         break;
       case 'r':
         ranksPerNode = atoi(optarg);
@@ -274,7 +281,7 @@ void parseCommandLine(const int argc, char * const argv[])
 
   // warnings/info
 
-  if (me == 0 && generateGraph && readBalanced) 
+  if (me == 0 && generateGraph && (readBalanced || readBalancedDynamic)) 
   {
     std::cout << "Balanced read (option -b) is only applicable for real-world graphs. "
       << "This option does nothing for generated (synthetic) graphs." << std::endl;

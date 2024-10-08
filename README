@@ -55,17 +55,20 @@ Possible options (can be combined):
                       equal number of edges among processes. Irregular number of vertices
                       owned by a particular process. Increases the distributed graph creation
                       time due to serial overheads, but may improve overall execution time.
-3.  -n <vertices>   : Only valid for synthetically generated inputs. Pass total number of 
+3.  -d              : Only valid for real-world inputs. Attempts to distribute approximately 
+                      equal number of edges among processes using dynamic programming, 
+                      linear partitioning (from Prof. Skiena's book).
+4.  -n <vertices>   : Only valid for synthetically generated inputs. Pass total number of 
                       vertices of the generated graph.
-4.  -l              : Use distributed LCG for randomly choosing edges. If this option 
+5.  -l              : Use distributed LCG for randomly choosing edges. If this option 
                       is not used, we will use C++ random number generator (using 
                       std::default_random_engine).
-5.  -p <percent>    : Only valid for synthetically generated inputs. Specify percent of overall 
+6.  -p <percent>    : Only valid for synthetically generated inputs. Specify percent of overall 
                       edges to be randomly generated between processes.
-6.  -r <nranks>     : This is used to control the number of aggregators in MPI I/O and is
+7.  -r <nranks>     : This is used to control the number of aggregators in MPI I/O and is
                       meaningful when an input binary graph file is passed with option "-f".
                       naggr := (nranks > 1) ? (nprocs/nranks) : nranks;
-7.  -s <size>       : Buffer size, only relevant when -DAGGR_<> is passed for aggregate-buffered 
+8.  -s <size>       : Buffer size, only relevant when -DAGGR_<> is passed for aggregate-buffered 
                       triangle counting. Default buffer size can be set by updating DEFAULT_BUF_SIZE. 
 
 Please try the default version (no need to pass any macro in the Makefile) or the aggregate-buffered
