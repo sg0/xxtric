@@ -64,8 +64,11 @@ class TriangleCounting
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), 
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
+      prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
       recv_count_(nullptr), rindex_(0), rdegree_(0)
+#if defined(RECV_MAP)
+      , rmap_({})
+#endif
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -184,30 +187,28 @@ class TriangleCounting
       if ((e0 + 1) == e1)
         continue;
 
-      for (GraphElem m = e0; m < e1; m++)
+      for (GraphElem m = e0; m < e1-1; m++)
       {
         Edge const& edge_m = g_->get_edge(m);
         const int owner = g_->get_owner(edge_m.tail_);
+        tup[0] = edge_m.tail_;
 
-        if (global_i > edge_m.tail_)
+        if (global_i > tup[0])
             continue;
 
         if (owner == rank_)
         {
-          GraphElem m_e0, m_e1;
-          g_->edge_range(g_->global_to_local(edge_m.tail_), m_e0, m_e1);
-          tup[0] = global_i;
-
-            for (GraphElem n = m_e0; n < m_e1; n++)
+            for (GraphElem n = m + 1; n < e1; n++)
             {
                 Edge const& edge_n = g_->get_edge(n);
-                tup[1] = edge_n.tail_;
-        
-                if (edge_m.tail_ > tup[1])
+
+                if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+                  break;
+
+                if (!edge_above_min(edge_m.tail_, edge_n.tail_))
                   continue;
 
-                // TODO FIXME min/max checks
-
+                tup[1] = edge_n.tail_;
 #if defined(FAST_CHECK_EDGELIST)
                 if (fast_check_edgelist(tup))
 #else
@@ -218,11 +219,22 @@ class TriangleCounting
         }
         else
         {
-          if (owner > rank_)
-          {
-            send_count[owner] += 2;
-            vcount_[i] += 1;
-          }
+            if (owner > rank_)
+            {
+                for (GraphElem n = m + 1; n < e1; n++)
+                {
+                    Edge const& edge_n = g_->get_edge(n);
+
+                    if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+                        break;
+
+                    if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+                        continue;
+
+                    send_count[owner] += 1;
+                    vcount_[i] += 1;
+                }
+            }
         }
       }
     }
@@ -272,8 +284,7 @@ class TriangleCounting
 
     nghosts_ = out_nghosts_ + in_nghosts_;
 
-    GraphElem even_bufsize = bufsize - bufsize % 2;
-    bufsize_ = (nghosts_ < even_bufsize) ? nghosts_ : even_bufsize;
+    bufsize_ = ((nghosts_*2) < bufsize) ? (nghosts_*2) : bufsize;
 
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
 
@@ -282,6 +293,7 @@ class TriangleCounting
  
     sbuf_     = new GraphElem[pdegree_*bufsize_];
     sbuf_ctr_ = new GraphElem[pdegree_]();
+    prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
     sreq_     = new MPI_Request[pdegree_];
     stat_     = new char[pdegree_];
@@ -290,6 +302,7 @@ class TriangleCounting
     rreq_     = new MPI_Request[rdegree_];
 
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
+    std::fill(prev_k_, prev_k_ + pdegree_, -1);
     std::fill(prev_m_, prev_m_ + pdegree_, -1);
     std::fill(stat_, stat_ + pdegree_, '0');
     
@@ -319,6 +332,7 @@ class TriangleCounting
       delete []sbuf_ctr_;
       delete []sreq_;
       delete []rreq_;
+      delete []prev_k_;
       delete []prev_m_;
       delete []stat_;
       delete []vcount_;
@@ -370,7 +384,7 @@ class TriangleCounting
       for (int p = 0; p < rdegree_; p++)
         nbrecv(sources_[p]);
     }
-
+    
     inline void lookup_edges()
     {
       const GraphElem lnv = g_->get_lnv();
@@ -387,13 +401,13 @@ class TriangleCounting
         if ((e0 + 1) == e1)
           continue;
 
-        for (GraphElem m = e0; m < e1; m++)
+        for (GraphElem m = e0; m < e1-1; m++)
         {
           EdgeStat& edge = g_->get_edge_stat(m);
           const int owner = g_->get_owner(edge.edge_->tail_);
-
+          
           if (global_i > edge.edge_->tail_)
-            continue;
+              continue;
 
           const GraphElem pidx = pindex_[owner];
           const GraphElem disp = pidx*bufsize_;
@@ -405,41 +419,70 @@ class TriangleCounting
 
             if (m >= prev_m_[pidx])
             {
-              if (sbuf_ctr_[pidx] == bufsize_)
+              if (sbuf_ctr_[pidx] == (bufsize_-1))
               {
                 prev_m_[pidx] = m;
+                prev_k_[pidx] = -1;
 
                 nbsend(owner);
 
                 continue;
               }
 
-              sbuf_[disp+sbuf_ctr_[pidx]] = global_i;
               sbuf_[disp+sbuf_ctr_[pidx]] = edge.edge_->tail_;
-              sbuf_ctr_[pidx] += 2;
+              sbuf_ctr_[pidx] += 1;
 
-              if (sbuf_ctr_[pidx] == bufsize_)
-              {
-                prev_m_[pidx] = m;
+              for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
+              {  
+                Edge const& edge_n = g_->get_edge(n); 
 
-                nbsend(owner);
+                if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+                  break;
 
-                break;
+                if (sbuf_ctr_[pidx] == (bufsize_-1))
+                {
+                  prev_m_[pidx] = m;
+                  prev_k_[pidx] = n;
+
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
+                  sbuf_ctr_[pidx] += 1;
+
+                  nbsend(owner);
+
+                  break;
+                }
+
+                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
+                  continue;
+
+                sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
+                sbuf_ctr_[pidx] += 1;
+
+                out_nghosts_ -= 1;
+                vcount_[i] -= 1;
               }
 
-              out_nghosts_ -= 2;
-              vcount_[i] -= 1;
+              if (stat_[pidx] == '0') 
+              {               
+                prev_m_[pidx] = m;
+                prev_k_[pidx] = -1;
+                
+                edge.active_ = false;
+
+                if (sbuf_ctr_[pidx] == (bufsize_-1))
+                {
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                  sbuf_ctr_[pidx] += 1;
+
+                  nbsend(owner);
+                }
+                else
+                {
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                  sbuf_ctr_[pidx] += 1;
+                }
+              }
             }
-          }
-
-          if (stat_[pidx] == '0') 
-          {               
-            prev_m_[pidx] = m;
-
-            edge.active_ = false;
-
-            if (sbuf_ctr_[pidx] == bufsize_)
-              nbsend(owner);
           }
         }
       }
@@ -549,14 +592,47 @@ class TriangleCounting
       return false;
     }
    
+#if defined(RECV_MAP)
+    bool find_pair(GraphElem (&pair)[2])
+    {
+      if (rmap_.count(pair[0]))
+      {
+        typedef std::multimap<const GraphElem, GraphElem>::const_iterator mmap_t;
+        std::pair<mmap_t, mmap_t> range = rmap_.equal_range(pair[0]);
+        
+        for (mmap_t it = range.first; it != range.second; ++it)
+          if (it->second == pair[1])
+            return true;
+      }
+      return false;
+    }
+
+    void check_rmap(GraphElem (&pair)[2])
+    {
+      if (find_pair(pair)) 
+        ntriangles_ += 1;
+      else
+      {
+        if (check_edgelist(pair))
+        {
+          ntriangles_ += 1;
+          rmap_.insert(std::pair<const GraphElem, GraphElem>{pair[0], pair[1]});
+        }
+      }
+    }
+#endif
+
+#if defined(USE_OPENMP)
     inline void process_recvs()
+#else
+    inline void process_recvs(int* rinds, MPI_Status* rstatuses)
+#endif
     {
       if (in_nghosts_ == 0)
         return;
 
 #if defined(USE_OPENMP) && !defined(RECV_MAP)
 #pragma omp parallel for default(shared) reduction(+:ntriangles_) reduction(-:in_nghosts_)
-#endif
       for (int p = 0; p < rdegree_; p++)
       {
         int over = -1;
@@ -566,7 +642,7 @@ class TriangleCounting
 
         if (over)
         { 
-          GraphElem tup[2] = {-1,-1}, m_e0, m_e1;
+          GraphElem tup[2] = {-1,-1}, prev = 0;
           int count = 0;
 
           const int source = status.MPI_SOURCE;
@@ -575,37 +651,116 @@ class TriangleCounting
 
           if (source != MPI_ANY_SOURCE)
           {
-            for (GraphElem k = 0; k < count; k+=2)
+            for (GraphElem k = 0; k < count;)
             {
-              tup[0] = rbuf_[p*bufsize_+k];
-              g_->edge_range(g_->global_to_local(rbuf_[p*bufsize_+k+1]), m_e0, m_e1);
-
-              for (GraphElem n = m_e0; n < m_e1; n++)
+              if (rbuf_[p*bufsize_+k] == -1)
               {
-                Edge const& edge_n = g_->get_edge(n);
-                tup[1] = edge_n.tail_;
+                k += 1;
+                prev = k;
+                continue;
+              }
 
-                if (rbuf_[p*bufsize_+k+1] > tup[1])
-                  continue;
+              tup[0] = rbuf_[p*bufsize_+k];
+              GraphElem curr_count = 0;
 
-                // TODO FIXME min/max checks
+              for (GraphElem m = k + 1; m < count; m++)
+              {
+                if (rbuf_[p*bufsize_+m] == -1)
+                {
+                  curr_count = m + 1;
+                  break;
+                }
 
+                tup[1] = rbuf_[p*bufsize_+m];
+
+#if defined(RECV_MAP)
+                check_rmap(tup);
+#else
+#if defined(USE_OPENMP_NESTED)
+                if (check_edgelist_omp(tup))
+                  ntriangles_ += 1;
+#else
 #if defined(FAST_CHECK_EDGELIST)
                 if (fast_check_edgelist(tup))
 #else
-                  if (check_edgelist(tup))
+                if (check_edgelist(tup))
 #endif
-                    ntriangles_ += 1;
+                  ntriangles_ += 1;
+#endif
+#endif
+                in_nghosts_ -= 1;
+                recv_count_[source] -= 1;
               }
+
+              k += (curr_count - prev);
+              prev = k;
             }
-            in_nghosts_ -= count;
-            recv_count_[source] -= count;
+
+           nbrecv(source);
+          
+          }
+        }
+      }
+#else
+      int over = -1;
+      MPI_Testsome(rdegree_, rreq_, &over, rinds, rstatuses);
+
+      for (int i = 0; i < over; i++)
+      {
+        GraphElem tup[2] = {-1,-1}, prev = 0;
+        const int idx = rinds[i];
+
+        int count = 0;
+        const int source = rstatuses[i].MPI_SOURCE;
+        MPI_Get_count(&rstatuses[i], MPI_GRAPH_TYPE, &count);
+
+        if (source != MPI_ANY_SOURCE)
+        {
+          for (GraphElem k = 0; k < count;)
+          {
+            if (rbuf_[idx*bufsize_+k] == -1)
+            {
+              k += 1;
+              prev = k;
+              continue;
+            }
+
+            tup[0] = rbuf_[idx*bufsize_+k];
+            GraphElem curr_count = 0;
+
+            for (GraphElem m = k + 1; m < count; m++)
+            {
+              if (rbuf_[idx*bufsize_+m] == -1)
+              {
+                curr_count = m + 1;
+                break;
+              }
+
+              tup[1] = rbuf_[idx*bufsize_+m];
+
+#if defined(RECV_MAP)
+              check_rmap(tup);
+#else
+#if defined(FAST_CHECK_EDGELIST)
+                if (fast_check_edgelist(tup))
+#else
+                if (check_edgelist(tup))
+#endif
+                  ntriangles_ += 1;
+#endif
+              in_nghosts_ -= 1;
+              recv_count_[source] -= 1;
+            }
+
+            k += (curr_count - prev);
+            prev = k;
           }
 
           nbrecv(source);
 
         }
       }
+#endif
     }
 
     inline GraphElem count()
@@ -618,6 +773,11 @@ class TriangleCounting
 #endif
 
       int* inds = new int[pdegree_]();
+#if defined(USE_OPENMP)
+#else
+      int* rinds = new int[rdegree_]();
+      MPI_Status* rstatuses = new MPI_Status[rdegree_]();
+#endif      
       int over = -1;
       
       nbrecv();
@@ -628,7 +788,11 @@ class TriangleCounting
       while(!done)
 #endif
       {
+#if defined(USE_OPENMP)
         process_recvs();
+#else
+        process_recvs(rinds, rstatuses);
+#endif
 
         if (out_nghosts_ == 0)
           nbsend();
@@ -674,7 +838,11 @@ class TriangleCounting
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
       
       delete []inds;
-
+#if defined(USE_OPENMP)
+#else
+      delete []rinds;
+      delete []rstatuses;
+#endif
       return ttc;
     }
 
@@ -682,14 +850,16 @@ class TriangleCounting
     Graph* g_;
 
     GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_;
-    GraphElem *sbuf_, *rbuf_, *recv_count_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
+    GraphElem *sbuf_, *rbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     MPI_Request *sreq_, *rreq_;
     char *stat_;
     
     std::vector<int> targets_, sources_;
     int rank_, size_;
     std::unordered_map<int, int> pindex_, rindex_; 
-
+#if defined(RECV_MAP)
+    std::multimap<const GraphElem, GraphElem> rmap_;
+#endif
     MPI_Comm comm_;
 };
 #endif
