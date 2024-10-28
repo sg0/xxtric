@@ -201,6 +201,9 @@ class TriangleCounting
             for (GraphElem n = m + 1; n < e1; n++)
             {
                 Edge const& edge_n = g_->get_edge(n);
+                                
+                if (edge_m.tail_ > edge_n.tail_)
+                  continue;
 
                 if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                   break;
@@ -224,6 +227,9 @@ class TriangleCounting
                 for (GraphElem n = m + 1; n < e1; n++)
                 {
                     Edge const& edge_n = g_->get_edge(n);
+                
+                    if (edge_m.tail_ > edge_n.tail_)
+                      continue;
 
                     if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                         break;
@@ -435,6 +441,9 @@ class TriangleCounting
               for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
               {  
                 Edge const& edge_n = g_->get_edge(n); 
+                    
+                if (edge.edge_->tail_ > edge_n.tail_)
+                  continue;
 
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
