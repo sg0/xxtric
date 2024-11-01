@@ -159,6 +159,9 @@ class TriangleCounting
             for (GraphElem n = m + 1; n < e1; n++)
             {
               Edge const& edge_n = g_->get_edge(n);
+                    
+              if (edge_m.tail_ > edge_n.tail_)
+                continue;
 
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
@@ -191,13 +194,13 @@ class TriangleCounting
       {
         Edge const& edge_m = g_->get_edge(m);
         const int owner = g_->get_owner(edge_m.tail_);
-        tup[0] = edge_m.tail_;
 
-        if (global_i > tup[0])
+        if (global_i > edge_m.tail_)
             continue;
 
         if (owner == rank_)
         {
+            tup[0] = edge_m.tail_;
             for (GraphElem n = m + 1; n < e1; n++)
             {
                 Edge const& edge_n = g_->get_edge(n);

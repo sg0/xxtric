@@ -476,23 +476,23 @@ class BinaryEdgeList
             GraphElem nbcap = (ne / nprocs), past_ecount_idx = 0;
             std::vector<GraphElem> ecount_idx(nv, 0);
             int p = 0;
-                
+
             fread(ecount_idx.data(), sizeof(GraphElem), nv, fp);
             fclose(fp);
 
             for (GraphElem m = 0; m < nv; m++)
             {
-                // bins[p] >= capacity only for the last process
-                if ((nbins[p] < nbcap) || (p == (nprocs - 1)))
-                    nbins[p] += (ecount_idx[m] - past_ecount_idx);
+              // bins[p] >= capacity only for the last process
+              if ((nbins[p] <= nbcap) || (p == (nprocs - 1)))
+                nbins[p] += (ecount_idx[m] - past_ecount_idx);
+              
+              // increment p as long as p is not the last process
+              // worst case: excess edges piled up on (p-1)
+              if ((nbins[p] > nbcap) && (p < (nprocs - 1)))
+                p++;
 
-                // increment p as long as p is not the last process
-                // worst case: excess edges piled up on (p-1)
-                if ((nbins[p] >= nbcap) && (p < (nprocs - 1)))
-                    p++;
-
-                mbins[p+1]++;
-                past_ecount_idx = ecount_idx[m];
+              mbins[p+1]++;
+              past_ecount_idx = ecount_idx[m];
             }
             
             // prefix sum to store indices 
