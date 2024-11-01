@@ -11,14 +11,14 @@ CXXFLAGS = -std=c++2a $(OPTFLAGS) -I.
 OBJ = main.o
 TARGET = tric
 
-ENABLE_OPENMP=0
+ENABLE_OPENMP=1
 ifeq ($(ENABLE_OPENMP),1)
 CXXFLAGS += -fopenmp -DUSE_OPENMP
 endif
 
 ENABLE_SHMEM=0
-CXX = CC
 ifeq ($(ENABLE_SHMEM), 1)
+CXX = CC
 LDFLAGS += -L/opt/cray/pe/pmi/6.1.11/lib -lpmi -lpmi2 
 endif
 
