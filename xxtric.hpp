@@ -134,9 +134,12 @@ class TriangleCounting
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
-
+            
             if (!edge_within_max(edge_m.tail_, edge_n.tail_))
               break;
+
+            if (edge_m.tail_ > edge_n.tail_)
+              continue;
 
             if (!edge_above_min(edge_m.tail_, edge_n.tail_))
               continue;
@@ -159,12 +162,12 @@ class TriangleCounting
             for (GraphElem n = m + 1; n < e1; n++)
             {
               Edge const& edge_n = g_->get_edge(n);
-                    
-              if (edge_m.tail_ > edge_n.tail_)
-                continue;
-
+               
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
+                   
+              if (edge_m.tail_ > edge_n.tail_)
+                continue;
 
               if (!edge_above_min(edge_m.tail_, edge_n.tail_))
                 continue;
@@ -204,12 +207,12 @@ class TriangleCounting
             for (GraphElem n = m + 1; n < e1; n++)
             {
                 Edge const& edge_n = g_->get_edge(n);
-                                
-                if (edge_m.tail_ > edge_n.tail_)
-                  continue;
-
+                 
                 if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                   break;
+                               
+                if (edge_m.tail_ > edge_n.tail_)
+                  continue;
 
                 if (!edge_above_min(edge_m.tail_, edge_n.tail_))
                   continue;
@@ -230,12 +233,12 @@ class TriangleCounting
                 for (GraphElem n = m + 1; n < e1; n++)
                 {
                     Edge const& edge_n = g_->get_edge(n);
-                
-                    if (edge_m.tail_ > edge_n.tail_)
-                      continue;
-
+                     
                     if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                         break;
+
+                    if (edge_m.tail_ > edge_n.tail_)
+                      continue;
 
                     if (!edge_above_min(edge_m.tail_, edge_n.tail_))
                         continue;
