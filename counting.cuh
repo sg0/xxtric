@@ -25,21 +25,21 @@ __global__
         if (edge_list[k] == edge_list[i])
           count++;
       }
+
+      data[threadIdx.x] = count;
+      __syncthreads();
+
+      for (unsigned int s=blocksize/2; s>=32; s>>=1)
+      {
+        if (threadIdx.x < s)
+          data[threadIdx.x] = data[threadIdx.x+s];
+        __syncthreads();
+      }
+      count = data[threadIdx.x%32];
+      for (int offset = 16; offset > 0; offset /= 2)
+        count += __shfl_down_sync(0xffffffff, count, offset);
     }
   }
-
-  data[threadIdx.x] = count;
-  __syncthreads();
-
-  for (unsigned int s=blocksize/2; s>=32; s>>=1)
-  {
-    if (threadIdx.x < s)
-      data[threadIdx.x] = data[threadIdx.x+s];
-    __syncthreads();
-  }
-  count = data[threadIdx.x%32];
-  for (int offset = 16; offset > 0; offset /= 2)
-    count += __shfl_down_sync(0xffffffff, count, offset);
 
   if(threadIdx.x == 0)
     *local_count = count; 
