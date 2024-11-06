@@ -69,6 +69,9 @@
 #include "xxtricrma3.hpp"
 #elif defined(USE_SHMEM_SIGNAL)
 #include "xxtricrma4.hpp"
+#elif defined(USE_CUDA)
+#include <cuda_runtime.h>
+#include "xxtric-gpu.hpp"
 #else
 #include "xxtric.hpp"
 #endif
@@ -82,7 +85,6 @@ static bool readBalanced = false;
 static bool readBalancedDynamic = false;
 static GraphWeight randomEdgePercent = 0.0;
 static bool randomNumberLCG = false;
-static bool bufferSet = false;
 static long bufferSize = -1;
 
 // parse command line parameters
@@ -270,7 +272,6 @@ void parseCommandLine(const int argc, char * const argv[])
         randomEdgePercent = atof(optarg);
         break;
       case 's':
-        bufferSet = true;
         bufferSize = atol(optarg);
         break;
       default:
