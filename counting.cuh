@@ -4,6 +4,7 @@ __global__
 (
  GraphElem start,
  GraphElem end,
+ GraphElem parent_edge,
  GraphElem jstart,
  GraphElem jend,
  GraphElem* __restrict__ edge_indices,
@@ -15,12 +16,15 @@ __global__
   __shared__ GraphElem count = 0;
   GraphElem step = gridDim.x;
 
-  for(GraphElem i = start+blockIdx.x; i < end; i += step)
+  for(GraphElem i = start + blockIdx.x; i < end; i += step)
   {
-    for(GraphElem k = jstart + threadIdx.x; k < jend; k+=blocksize)
+    if (parent_edge < edge_list[i])
     {
-      if (edge_list[k] == edge_list[i])
-        count++;
+      for(GraphElem k = jstart + threadIdx.x; k < jend; k+=blocksize)
+      {
+        if (edge_list[k] == edge_list[i])
+          count++;
+      }
     }
   }
 
