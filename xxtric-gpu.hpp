@@ -65,7 +65,7 @@ class TriangleCounting
     TriangleCounting(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), 
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
-      nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
+      d_ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
       recv_count_(nullptr), rindex_(0), rdegree_(0), d_eind_(nullptr), d_elst_(nullptr)
   {
@@ -116,9 +116,11 @@ class TriangleCounting
 
     CudaMalloc(d_eind_, lnv*sizeof(GraphElem));
     CudaMalloc(d_elst_, lne*sizeof(GraphElem));
+    CudaMalloc(d_ntriangles_, sizeof(GraphElem));
 
     CudaMemcpyHtoD(d_eind_, g_->edge_indices_.data(), lnv*sizeof(GraphElem));
     CudaMemcpyHtoD(d_elst_, etails.data(), lne*sizeof(GraphElem));
+    CudaMemset(&d_ntriangles_, 0, sizeof(GraphElem));
 
     etails.clear();
 
@@ -146,9 +148,9 @@ class TriangleCounting
           g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
 
           GraphElem nblocks = ((e1-(m+1)+1) > MAX_GRIDDIM) ? MAX_GRIDDIM : (e1-(m+1)+1); 
-          local_count_gpu<GRIDDIM><<<nblocks, GRIDDIM>>>(m+1, e1, edge_m.tail_, jstart, jend, d_eind_, d_elst_, &ntriangles_);
-
+          local_count_gpu<GRIDDIM><<<nblocks, GRIDDIM>>>(m+1, e1, edge_m.tail_, jstart, jend, d_eind_, d_elst_, &d_ntriangles_);
           CudaDeviceSynchronize();
+          CudaMemcpyDtoH(&ntriangles_, &d_ntriangles_, sizeof(GraphElem));
         }
         else
         {
@@ -792,7 +794,7 @@ class TriangleCounting
   private:
     Graph* g_;
 
-    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_;
+    GraphElem ntriangles_, d_ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_;
     GraphElem *sbuf_, *rbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_, *d_eind_, *d_elst_;
     MPI_Request *sreq_, *rreq_;
     char *stat_;

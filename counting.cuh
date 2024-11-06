@@ -9,7 +9,7 @@ __global__
  GraphElem jend,
  GraphElem* __restrict__ edge_indices,
  GraphElem* __restrict__ edge_list,
- GraphElem* local_count 
+ GraphElem* d_local_count 
  )
 {
   volatile __shared__ short data[blocksize];
@@ -18,7 +18,7 @@ __global__
 
   for(GraphElem i = start + blockIdx.x; i < end; i += step)
   {
-    if (parent_edge < edge_list[i])
+    //if (parent_edge < edge_list[i])
     {
       for(GraphElem k = jstart + threadIdx.x; k < jend; k+=blocksize)
       {
@@ -42,7 +42,7 @@ __global__
   }
 
   if(threadIdx.x == 0)
-    *local_count = count; 
+    *d_local_count = count; 
   __syncthreads();
 }
 
