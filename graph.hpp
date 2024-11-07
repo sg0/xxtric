@@ -130,6 +130,9 @@ class Graph
           edge_indices_.clear();
           parts_.clear();
         }
+
+        void operator delete(void* ptr, size_t size) { free(ptr); }
+        void operator delete[](void* ptr, size_t size) { free(ptr); }
          
         // update vertex partition information
         void repart(std::vector<GraphElem> const& parts)
