@@ -147,7 +147,7 @@ class TriangleCounting
 
           GraphElem nblocks = ((e1-(m+1)) > MAX_GRIDDIM) ? MAX_GRIDDIM : (e1-(m+1)); 
           //local_count_gpu<WARPSIZE,GRIDDIM><<<nblocks, GRIDDIM>>>(m+1, e1, jstart, jend, d_elst_, d_ntriangles_);
-          local_count_gpu2<GRIDDIM><<<nblocks, GRIDDIM>>>(m+1, e1, edge_m.tail_, jstart, jend, d_eind_, d_elst_, d_ntriangles_);
+          local_count_gpu<GRIDDIM><<<nblocks, GRIDDIM>>>(m+1, e1, edge_m.tail_, jstart, jend, d_eind_, d_elst_, d_ntriangles_);
           /*
           local_count_cpu(m+1, e1, jstart, jend, etails.data(), ntriangles_);
           */
