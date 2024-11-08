@@ -2,7 +2,10 @@
 #pragma once
 #ifndef COUNTING_CUH
 #define COUNTING_CUH
+#include <cuda.h>
+#include <cuda_runtime.h>
 
+#include "deftypes.hpp"
 #ifdef USE_CUDA
 #ifdef DEBUG_CUDA
 #define CudaCall(ans) { CudaAssert((ans), __FILE__, __LINE__); }
@@ -117,11 +120,10 @@ CudaCall(cudaDeviceSynchronize())
 #define MAX_GRIDDIM     (65535)
 #endif // end of USE_CUDA
 
-
-
+// kernels
 template<const int WarpSize, const int BlockSize>
 __global__
-void local_count_gpu
+void local_count_gpu_kernel
 (
  const GraphElem start,
  const GraphElem end,
@@ -133,7 +135,7 @@ void local_count_gpu
 
 template<const int WarpSize, const int BlockSize>
 __global__
-void local_count_gpu1
+void local_count_gpu1_kernel
 (
  const GraphElem start,
  const GraphElem end,
@@ -145,7 +147,7 @@ void local_count_gpu1
 
 template<const int blocksize>
 __global__
-  void local_count_gpu2
+  void local_count_gpu2_kernel
 (
  GraphElem start,
  GraphElem end,
@@ -157,12 +159,24 @@ __global__
  GraphElem* d_local_count 
  );
 
-void local_count_cpu
+// callers
+void local_count_gpu
 (
  const GraphElem start,
  const GraphElem end,
  const GraphElem jstart,
  const GraphElem jend,
+ GraphElem* edge_list,
+ GraphElem* d_local_count 
+ );
+
+// CPU kernel
+void local_count_cpu
+(
+ GraphElem start,
+ GraphElem end,
+ GraphElem jstart,
+ GraphElem jend,
  GraphElem* __restrict__ edge_list,
  GraphElem* d_local_count 
  );

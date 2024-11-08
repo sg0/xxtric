@@ -55,6 +55,7 @@
 #define TAG_DATA  (100)
 #endif
 
+#include "counting.cuh"
 
 class TriangleCounting
 {
@@ -142,13 +143,8 @@ class TriangleCounting
         {
           GraphElem jstart, jend;
           g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
-
-          GraphElem nblocks = ((e1-(m+1)) > MAX_GRIDDIM) ? MAX_GRIDDIM : (e1-(m+1)); 
-          //local_count_gpu<WARPSIZE,GRIDDIM><<<nblocks, GRIDDIM>>>(m+1, e1, jstart, jend, d_elst_, d_ntriangles_);
-          local_count_gpu<GRIDDIM><<<nblocks, GRIDDIM>>>(m+1, e1, edge_m.tail_, jstart, jend, d_eind_, d_elst_, d_ntriangles_);
-          /*
-          local_count_cpu(m+1, e1, jstart, jend, etails.data(), ntriangles_);
-          */
+          local_count_gpu(m+1, e1, jstart, jend, d_elst_, d_ntriangles_);
+          //local_count_cpu(m+1, e1, jstart, jend, etails.data(), ntriangles_);
         }
         else
         {

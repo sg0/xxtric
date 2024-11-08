@@ -72,7 +72,6 @@
 #elif defined(USE_SHMEM_SIGNAL)
 #include "xxtricrma4.hpp"
 #elif defined(USE_CUDA)
-#include "counting.cuh"
 #include "xxtric-gpu.hpp"
 #else
 #include "xxtric.hpp"

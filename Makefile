@@ -1,4 +1,4 @@
-CXX = mpicxx
+CXX = CC
 DBGFLAGS = -g -fomit-frame-pointer
 #OPTFLAGS = $(DBGFLAGS) -O3 -DPRINT_EXTRA_NEDGES #-DDEBUG_PRINTF   
 OPTFLAGS = -O3 -DPRINT_EXTRA_NEDGES #-DFAST_CHECK_EDGELIST -DUSE_SHMEM_ORDER #-DUSE_SHMEM_ORDER -DUSE_SHMEM_SIGNAL -DUSE_MPI_RMA_PASSIVE#-DDEBUG_PRINTF   
@@ -6,7 +6,7 @@ OPTFLAGS = -O3 -DPRINT_EXTRA_NEDGES #-DFAST_CHECK_EDGELIST -DUSE_SHMEM_ORDER #-D
 #  add extra edges randomly on a generated graph
 # use export ASAN_OPTIONS=verbosity=1 to check ASAN output
 SNTFLAGS = -std=c++2a -fsanitize=address -O1 -fno-omit-frame-pointer
-CXXFLAGS = -std=c++2a $(OPTFLAGS) -I.
+CXXFLAGS = --std=c++20 $(OPTFLAGS) -I.
 
 OBJ = main.o
 TARGET = tric
@@ -27,11 +27,12 @@ endif
 ENABLE_CUDA=0
 ifeq ($(ENABLE_CUDA),1)
 NVCXX = nvcc
-MPI_PATH = /share/apps/openmpi/5.0.5/gcc/12.2.0
-CUDA_PATH = /share/apps/cuda/12.3
-CUDA_CXXFLAGS = -DUSE_CUDA -gencode arch=compute_80,code=sm_80 
-CUDA_INCLUDE += -I. -I$(CUDA_PATH)/include -I$(MPI_PATH)/include
-LDFLAGS += -ldl -L$(MPI_PATH)/lib -lmpi -L$(CUDA_PATH)/lib64 -lcudart
+MPI_PATH = /opt/cray/pe/mpich/8.1.28/ofi/nvidia/23.3
+CUDA_PATH = /opt/nvidia/hpc_sdk/Linux_x86_64/23.9/cuda/12.2
+CXXFLAGS += -DUSE_CUDA
+CUDA_CXXFLAGS = -gencode arch=compute_80,code=sm_80 
+INCLUDE += -I$(MPI_PATH)/include -I$(CUDA_PATH)/include 
+LDFLAGS += -lm -lrt -ldl -L$(MPI_PATH)/lib -lmpi -L$(CUDA_PATH)/lib64 -lcudart
 OBJ += counting.o
 endif
 
@@ -43,7 +44,7 @@ endif
 
 %.o: %.cpp
 ifeq ($(ENABLE_CUDA),1)
-	$(NVCXX) $(CUDA_INCLUDE) $(CUDA_CXXFLAGS) -c counting.cu
+	$(NVCXX) $(INCLUDE) $(CXXFLAGS) $(CUDA_CXXFLAGS) -c counting.cu
 	$(CXX) $(INCLUDE) $(CXXFLAGS) -c -o $@ $^
 else
 	$(CXX) $(INCLUDE) $(CXXFLAGS) -c -o $@ $^
@@ -51,6 +52,7 @@ endif
 
 $(TARGET):  $(OBJ)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ 
+
 
 .PHONY: clean
 

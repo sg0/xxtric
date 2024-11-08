@@ -1,15 +1,26 @@
-#include <cuda.h>
-#include <cuda_runtime.h>
+#include "deftypes.hpp"
+#include "counting.cuh"
 
 #include <cooperative_groups.h> 
-
 namespace cg = cooperative_groups;
 
-#include "deftypes.hpp"
+void local_count_gpu
+(
+ const GraphElem start,
+ const GraphElem end,
+ const GraphElem jstart,
+ const GraphElem jend,
+ GraphElem* __restrict__ edge_list,
+ GraphElem* d_local_count 
+ )
+{
+  GraphElem nblocks = (end - start) > MAX_GRIDDIM ? MAX_GRIDDIM : (end - start); 
+  local_count_gpu_kernel<WARPSIZE,GRIDDIM><<<nblocks, GRIDDIM>>>(start, end, jstart, jend, edge_list, d_local_count);
+}
 
 template<const int WarpSize, const int BlockSize>
 __global__
-void local_count_gpu
+void local_count_gpu_kernel
 (
  const GraphElem start,
  const GraphElem end,
@@ -53,7 +64,7 @@ void local_count_gpu
 
 template<const int WarpSize, const int BlockSize>
 __global__
-void local_count_gpu1
+void local_count_gpu1_kernel
 (
  const GraphElem start,
  const GraphElem end,
@@ -87,7 +98,7 @@ void local_count_gpu1
 
 template<const int blocksize>
 __global__
-  void local_count_gpu2
+  void local_count_gpu2_kernel
 (
  GraphElem start,
  GraphElem end,
