@@ -40,7 +40,6 @@
 #ifndef XXTRIC_HPP
 #define XXTRIC_HPP
 
-#include "graph.hpp"
 
 #include <numeric>
 #include <utility>
@@ -56,7 +55,6 @@
 #define TAG_DATA  (100)
 #endif
 
-#include "counting.cuh"
 
 class TriangleCounting
 {

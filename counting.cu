@@ -1,3 +1,12 @@
+#include <cuda.h>
+#include <cuda_runtime.h>
+
+#include <cooperative_groups.h> 
+
+namespace cg = cooperative_groups;
+
+#include "deftypes.hpp"
+
 template<const int WarpSize, const int BlockSize>
 __global__
 void local_count_gpu
@@ -12,10 +21,14 @@ void local_count_gpu
 {   
     cg::thread_block block = cg::this_thread_block();
     cg::thread_block_tile<WarpSize> warp = cg::tiled_partition<WarpSize>(block);
-    __shared__ GraphElem count = 0;
+    __shared__ GraphElem count;
 
     const unsigned block_tid = block.thread_rank();
     const unsigned warp_tid = warp.thread_rank();
+
+    if (threadIdx.x == 0) 
+      count = 0;
+    __syncthreads();
 
     GraphElem step = gridDim.x*BlockSize/WarpSize;
     GraphElem u0 = block_tid/WarpSize+BlockSize/WarpSize*blockIdx.x;
@@ -87,8 +100,12 @@ __global__
  )
 {
   volatile __shared__ short data[blocksize];
-  __shared__ GraphElem count = 0;
+  __shared__ GraphElem count;
   GraphElem step = gridDim.x;
+    
+  if (threadIdx.x == 0) 
+    count = 0;
+  __syncthreads();
 
   for(GraphElem i = start + blockIdx.x; i < end; i += step)
   {

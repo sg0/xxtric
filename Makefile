@@ -11,6 +11,8 @@ CXXFLAGS = -std=c++2a $(OPTFLAGS) -I.
 OBJ = main.o
 TARGET = tric
 
+all: $(TARGET)
+
 ENABLE_OPENMP=0
 ifeq ($(ENABLE_OPENMP),1)
 CXXFLAGS += -fopenmp -DUSE_OPENMP
@@ -25,11 +27,12 @@ endif
 ENABLE_CUDA=0
 ifeq ($(ENABLE_CUDA),1)
 NVCXX = nvcc
-MPI_PATH = /share/apps/openmpi/5.0.5/gcc/14.1.0
-CUDA_PATH = /share/apps/cuda/11.1
+MPI_PATH = /share/apps/openmpi/5.0.5/gcc/12.2.0
+CUDA_PATH = /share/apps/cuda/12.3
 CUDA_CXXFLAGS = -DUSE_CUDA -gencode arch=compute_80,code=sm_80 
-CUDA_INCLUDE += -I$(CUDA_PATH)/include #-I$(MPI_PATH)/include
+CUDA_INCLUDE += -I. -I$(CUDA_PATH)/include -I$(MPI_PATH)/include
 LDFLAGS += -ldl -L$(MPI_PATH)/lib -lmpi -L$(CUDA_PATH)/lib64 -lcudart
+OBJ += counting.o
 endif
 
 ENABLE_TAUPROF=0
@@ -38,15 +41,12 @@ TAU=/people/ghos167/builds/tau-2.32/x86_64/lib
 CXX = tau_cxx.sh -tau_makefile=$(TAU)/Makefile.tau-mpi-openmp-mpit
 endif
 
-
-all: $(TARGET)
-
 %.o: %.cpp
-	$(CXX) $(INCLUDE) $(CXXFLAGS) -c -o $@ $^
-
 ifeq ($(ENABLE_CUDA),1)
-%.o: %.cu
-	$(NVCXX) $(CUDA_INCLUDE) $(CUDA_CXXFLAGS) -c -o $@ $^
+	$(NVCXX) $(CUDA_INCLUDE) $(CUDA_CXXFLAGS) -c counting.cu
+	$(CXX) $(INCLUDE) $(CXXFLAGS) -c -o $@ $^
+else
+	$(CXX) $(INCLUDE) $(CXXFLAGS) -c -o $@ $^
 endif
 
 $(TARGET):  $(OBJ)
@@ -55,4 +55,4 @@ $(TARGET):  $(OBJ)
 .PHONY: clean
 
 clean:
-	rm -rf *~ $(OBJ) $(TARGET) *.dSYM
+	rm -rf *~ $(OBJ) $(TARGET) *.o *.dSYM

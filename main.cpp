@@ -51,7 +51,9 @@
 #include <sstream>
 #include <string>
 
-#include <mpi.h>
+#include "deftypes.hpp"
+#include "utils.hpp"
+#include "graph.hpp"
 
 #if defined(USE_SHMEM_ORDER) || defined(USE_SHMEM_SIGNAL)
 #include <shmem.h>
@@ -70,6 +72,7 @@
 #elif defined(USE_SHMEM_SIGNAL)
 #include "xxtricrma4.hpp"
 #elif defined(USE_CUDA)
+#include "counting.cuh"
 #include "xxtric-gpu.hpp"
 #else
 #include "xxtric.hpp"
