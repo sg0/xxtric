@@ -143,7 +143,7 @@ class TriangleCounting
         {
           GraphElem jstart, jend;
           g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
-          local_count_gpu(m+1, e1, jstart, jend, d_elst_, d_ntriangles_);
+          local_count_gpu(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, edge_m.tail_);
           //local_count_cpu(m+1, e1, jstart, jend, etails.data(), ntriangles_);
         }
         else
@@ -171,9 +171,6 @@ class TriangleCounting
       }
     }
     
-    etails.clear();
-    etails.resize(lne, 0);
-
     CudaDeviceSynchronize();
     CudaMemcpyDtoH(&ntriangles_, d_ntriangles_, sizeof(GraphElem));
 

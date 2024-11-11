@@ -11,11 +11,13 @@ void local_count_gpu
  const GraphElem jstart,
  const GraphElem jend,
  GraphElem* __restrict__ edge_list,
- GraphElem* d_local_count 
+ GraphElem* d_local_count,
+ GraphElem parent_edge 
  )
 {
   GraphElem nblocks = (end - start) > MAX_GRIDDIM ? MAX_GRIDDIM : (end - start); 
   local_count_gpu_kernel<WARPSIZE,GRIDDIM><<<nblocks, GRIDDIM>>>(start, end, jstart, jend, edge_list, d_local_count);
+  //local_count_gpu2_kernel<WARPSIZE><<<nblocks, GRIDDIM>>>(start, end, parent_edge, jstart, jend, edge_list, d_local_count);
 }
 
 template<const int WarpSize, const int BlockSize>
@@ -36,11 +38,11 @@ void local_count_gpu_kernel
 
     const unsigned block_tid = block.thread_rank();
     const unsigned warp_tid = warp.thread_rank();
-
-    if (threadIdx.x == 0) 
+    
+    if (block_tid == 0) 
       count = 0;
     __syncthreads();
-
+    
     GraphElem step = gridDim.x*BlockSize/WarpSize;
     GraphElem u0 = block_tid/WarpSize+BlockSize/WarpSize*blockIdx.x;
     
@@ -105,7 +107,6 @@ __global__
  GraphElem parent_edge,
  GraphElem jstart,
  GraphElem jend,
- GraphElem* __restrict__ edge_indices,
  GraphElem* __restrict__ edge_list,
  GraphElem* d_local_count 
  )
@@ -144,8 +145,9 @@ __global__
   }
 
   if(threadIdx.x == 0)
-    *d_local_count += count; 
-  __syncthreads();
+    atomicAdd((int*)d_local_count, (int)count);
+    //*d_local_count = count; 
+  //__syncthreads();
 }
 
 void local_count_cpu

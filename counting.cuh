@@ -154,7 +154,6 @@ __global__
  GraphElem parent_edge,
  GraphElem jstart,
  GraphElem jend,
- GraphElem* __restrict__ edge_indices,
  GraphElem* __restrict__ edge_list,
  GraphElem* d_local_count 
  );
@@ -167,7 +166,8 @@ void local_count_gpu
  const GraphElem jstart,
  const GraphElem jend,
  GraphElem* edge_list,
- GraphElem* d_local_count 
+ GraphElem* d_local_count,
+ GraphElem parent_edge = 0 
  );
 
 // CPU kernel
