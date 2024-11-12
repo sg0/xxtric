@@ -127,6 +127,7 @@ void local_count_gpu_kernel
 (
  const GraphElem start,
  const GraphElem end,
+ const GraphElem parent_edge,
  const GraphElem jstart,
  const GraphElem jend,
  GraphElem* __restrict__ edge_list,
