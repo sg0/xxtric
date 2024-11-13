@@ -64,9 +64,9 @@ class TriangleCounting
     TriangleCounting(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), 
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
-      d_ntriangles_(nullptr), nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
+      nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
-      recv_count_(nullptr), rindex_(0), rdegree_(0), d_eind_(nullptr), d_elst_(nullptr)
+      recv_count_(nullptr), rindex_(0), rdegree_(0), d_eind_(nullptr), d_elst_(nullptr), d_ntriangles_(nullptr)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -143,7 +143,7 @@ class TriangleCounting
         {
           GraphElem jstart, jend;
           g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
-          local_count_gpu(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, edge_m.tail_);
+          local_count_gpu(m+1, e1, jstart, jend, d_elst_, d_ntriangles_);
           //local_count_cpu(m+1, e1, jstart, jend, etails.data(), ntriangles_);
         }
         else
@@ -170,7 +170,7 @@ class TriangleCounting
         }
       }
     }
-    
+        
     CudaDeviceSynchronize();
     CudaMemcpyDtoH(&ntriangles_, d_ntriangles_, sizeof(GraphElem));
 
@@ -274,6 +274,7 @@ class TriangleCounting
 
       CudaFree(d_eind_);
       CudaFree(d_elst_);
+      CudaFree(d_ntriangles_);
 
 #if defined(RECV_MAP)
       rmap_.clear();
@@ -793,7 +794,9 @@ class TriangleCounting
 
     GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_;
     GraphElem *sbuf_, *rbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
+    
     GraphElem *d_eind_, *d_elst_, *d_ntriangles_; // device
+    
     MPI_Request *sreq_, *rreq_;
     char *stat_;
     

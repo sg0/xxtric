@@ -6,7 +6,7 @@
 #include <cuda_runtime.h>
 
 #include "deftypes.hpp"
-#ifdef USE_CUDA
+
 #ifdef DEBUG_CUDA
 #define CudaCall(ans) { CudaAssert((ans), __FILE__, __LINE__); }
 inline void CudaAssert(cudaError_t code, const char *file, int line, bool abort=true)
@@ -46,6 +46,10 @@ inline void CudaAssert(cudaError_t code, const char *file, int line, bool abort=
 {\
     CudaCall(cudaMallocHost((void**)&ptr, size)); \
 }
+#define CudaStreamCreate(stream) \
+{\
+   CudaCall(cudaStreamCreate((cudaStream_t*)&stream));\
+}
 
 #define CudaMemcpyUVA(dest, src, size)\
 CudaCall(cudaMemcpy(dest, src, size, cudaMemcpyDefault))
@@ -77,6 +81,16 @@ CudaCall(cudaMemcpyAsync(dest, src, size, cudaMemcpyDeviceToHost, stream))
    if(ptr != nullptr) \
        CudaCall(cudaFreeHost(ptr)); \
    ptr = nullptr; \
+}
+
+#define CudaStreamDestroy(stream) \
+{\
+   CudaCall(cudaStreamDestroy(stream));\
+}
+
+#define CudaStreamSynchronize(stream) \
+{\
+   CudaCall(cudaStreamSynchronize(stream));\
 }
 
 #define CudaDeviceSynchronize()\
@@ -118,57 +132,30 @@ CudaCall(cudaDeviceSynchronize())
 #define GRIDDIM         (64)
 #define MAX_BLOCKDIM    (1024)
 #define MAX_GRIDDIM     (65535)
-#endif // end of USE_CUDA
 
-// kernels
-template<const int WarpSize, const int BlockSize>
-__global__
-void local_count_gpu_kernel
-(
- const GraphElem start,
- const GraphElem end,
- const GraphElem parent_edge,
- const GraphElem jstart,
- const GraphElem jend,
- GraphElem* __restrict__ edge_list,
- GraphElem* d_local_count 
- );
+#ifndef MAX_CUDA_STREAMS
+#define MAX_CUDA_STREAMS (8)
+#endif
 
-template<const int WarpSize, const int BlockSize>
-__global__
-void local_count_gpu1_kernel
+ void local_count_gpu
 (
  const GraphElem start,
  const GraphElem end,
  const GraphElem jstart,
  const GraphElem jend,
- GraphElem* __restrict__ edge_list,
- GraphElem* d_local_count 
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
  );
 
-template<const int blocksize>
 __global__
-  void local_count_gpu2_kernel
-(
- GraphElem start,
- GraphElem end,
- GraphElem parent_edge,
- GraphElem jstart,
- GraphElem jend,
- GraphElem* __restrict__ edge_list,
- GraphElem* d_local_count 
- );
-
-// callers
-void local_count_gpu
+  void local_count_gpu_kernel
 (
  const GraphElem start,
  const GraphElem end,
  const GraphElem jstart,
  const GraphElem jend,
- GraphElem* edge_list,
- GraphElem* d_local_count,
- GraphElem parent_edge = 0 
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
  );
 
 // CPU kernel
