@@ -14,8 +14,14 @@ namespace cg = cooperative_groups;
  GraphElem* __restrict__ d_local_count
  )
 {
-  GraphElem nblocks = (end - start) > MAX_GRIDDIM ? MAX_GRIDDIM : (end - start); 
-  local_count_gpu_kernel<<<nblocks, GRIDDIM>>>(start, end, jstart, jend, d_edge_list, d_local_count);
+  //GraphElem nblocks = (end - start) > MAX_GRIDDIM ? MAX_GRIDDIM : (end - start); 
+  //local_count_gpu_kernel<<<nblocks, GRIDDIM>>>(start, end, jstart, jend, d_edge_list, d_local_count);
+  GraphElem range = std::ceil((end - start) / 2)*2;
+  if (range < BLOCKDIM04)
+    range = BLOCKDIM04;
+  GraphElem nblocks = (range / BLOCKDIM04) > MAX_GRIDDIM ? MAX_GRIDDIM : (range / BLOCKDIM04);
+    
+  local_count_gpu_kernel<<<nblocks, BLOCKDIM04>>>(start, end, jstart, jend, d_edge_list, d_local_count);
 }
 
 __global__
