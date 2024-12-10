@@ -143,8 +143,11 @@ class TriangleCounting
         {
           GraphElem jstart, jend;
           g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
+#if defined(USE_CUDA)
           local_count_gpu(m+1, e1, jstart, jend, d_elst_, d_ntriangles_);
-          //local_count_cpu(m+1, e1, jstart, jend, etails.data(), ntriangles_);
+#else
+          local_count_cpu(m+1, e1, jstart, jend, etails.data(), ntriangles_);
+#endif
         }
         else
         {
