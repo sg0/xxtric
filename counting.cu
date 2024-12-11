@@ -17,7 +17,45 @@ void local_count_gpu
   GraphElem nblocks = ((end-start) + BLOCKDIM03 - 1) / BLOCKDIM03;
   local_count_gpu_kernel<<<nblocks, BLOCKDIM03, BLOCKDIM03*sizeof(GraphElem)>>>(start, end, jstart, jend, d_edge_list, d_local_count);
 }
+__global__
+  void local_count_gpu_kernel
+(
+ const GraphElem start,
+ const GraphElem end,
+ const GraphElem jstart,
+ const GraphElem jend,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+ )
+{
+  __shared__ GraphElem sdata[BLOCKDIM03];
+  GraphElem tid = threadIdx.x;
+  sdata[tid] = 0;
+    
+  __syncthreads();
+  
+  for (GraphElem i = start + blockIdx.x; i < end; i += gridDim.x)
+  {
+    for(GraphElem k = jstart + threadIdx.x; k < jend; k += blockDim.x)
+    {
+      if (d_edge_list[k] == d_edge_list[i])
+        sdata[tid]++;
+    }
 
+  }
+    
+  __syncthreads();
+
+  for (GraphElem s=blockDim.x/2; s>0; s>>=1) 
+  {
+    if (tid < s)
+      sdata[tid] += sdata[tid + s];
+  }
+
+  if (tid == 0) 
+    atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
+}
+#if 0
 __global__
   void local_count_gpu_kernel
 (
@@ -56,7 +94,6 @@ __global__
     atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
 }
 
-#if 0
   template <unsigned int blockSize>
 __device__ void warpReduce(GraphElem *sdata, unsigned int tid)
 {
