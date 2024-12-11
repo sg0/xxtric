@@ -158,6 +158,13 @@ __global__
  GraphElem* __restrict__ d_local_count
  );
 
+__device__ 
+void unroll_last_warp
+(
+ volatile GraphElem *sdata, 
+ GraphElem tid
+);
+
 // CPU kernel
 void local_count_cpu
 (

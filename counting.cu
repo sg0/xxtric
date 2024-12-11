@@ -15,8 +15,19 @@ void local_count_gpu
  )
 {
   GraphElem nblocks = ((end-start) + BLOCKDIM03 - 1) / BLOCKDIM03;
-  local_count_gpu_kernel<<<nblocks, BLOCKDIM03, BLOCKDIM03*sizeof(GraphElem)>>>(start, end, jstart, jend, d_edge_list, d_local_count);
+  local_count_gpu_kernel<<<nblocks, BLOCKDIM03>>>(start, end, jstart, jend, d_edge_list, d_local_count);
 }
+
+__device__ void unroll_last_warp(volatile GraphElem *sdata, GraphElem tid)
+{
+  sdata[tid] += sdata[tid + 32];
+  sdata[tid] += sdata[tid + 16];
+  sdata[tid] += sdata[tid + 8];
+  sdata[tid] += sdata[tid + 4];
+  sdata[tid] += sdata[tid + 2];
+  sdata[tid] += sdata[tid + 1];
+}
+
 __global__
   void local_count_gpu_kernel
 (
@@ -46,65 +57,22 @@ __global__
     
   __syncthreads();
 
-  for (GraphElem s=blockDim.x/2; s>0; s>>=1) 
+  for (GraphElem s=blockDim.x/2; s>32; s>>=1) 
   {
     if (tid < s)
       sdata[tid] += sdata[tid + s];
+    __syncthreads();
   }
+
+  if (tid < 32) 
+    unroll_last_warp(sdata, tid);
 
   if (tid == 0) 
     atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
 }
+
+
 #if 0
-__global__
-  void local_count_gpu_kernel
-(
- const GraphElem start,
- const GraphElem end,
- const GraphElem jstart,
- const GraphElem jend,
- const GraphElem* __restrict__ d_edge_list,
- GraphElem* __restrict__ d_local_count
- )
-{
-  __shared__ GraphElem sdata[BLOCKDIM03];
-  GraphElem tid = threadIdx.x;
-  sdata[tid] = 0;
-    
-  __syncthreads();
-  
-  for (GraphElem i = start + blockDim.x * blockIdx.x + tid; i < end; i += blockDim.x*gridDim.x)
-  {
-    for(GraphElem k = jstart; k < jend; k++)
-    {
-      if (d_edge_list[k] == d_edge_list[i])
-        sdata[tid]++;
-    }
-
-    for (GraphElem s=blockDim.x/2; s>0; s>>=1) 
-    {
-      if (tid < s)
-        sdata[tid] += sdata[tid + s];
-    }
-  }
-    
-  __syncthreads();
-  
-  if (tid == 0) 
-    atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
-}
-
-  template <unsigned int blockSize>
-__device__ void warpReduce(GraphElem *sdata, unsigned int tid)
-{
-  if (blockSize >= 64) sdata[tid] += sdata[tid + 32];
-  if (blockSize >= 32) sdata[tid] += sdata[tid + 16];
-  if (blockSize >= 16) sdata[tid] += sdata[tid + 8];
-  if (blockSize >= 8) sdata[tid] += sdata[tid + 4];
-  if (blockSize >= 4) sdata[tid] += sdata[tid + 2];
-  if (blockSize >= 2) sdata[tid] += sdata[tid + 1];
-}
-
 __global__
   void local_count_gpu_kernel
 (
