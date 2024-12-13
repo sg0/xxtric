@@ -52,7 +52,6 @@ __global__
       if (d_edge_list[k] == d_edge_list[i])
         sdata[tid]++;
     }
-
   }
     
   __syncthreads();
@@ -73,37 +72,6 @@ __global__
 
 
 #if 0
-__global__
-  void local_count_gpu_kernel
-(
- const GraphElem start,
- const GraphElem end,
- const GraphElem jstart,
- const GraphElem jend,
- const GraphElem* __restrict__ d_edge_list,
- GraphElem* __restrict__ d_local_count
- )
-{
-  __shared__ GraphElem count;
-
-  if (threadIdx.x == 0)
-    count = 0;
-  __syncthreads();
-
-  for (GraphElem i = start + blockDim.x * blockIdx.x + threadIdx.x; i < end; i +=  blockDim.x*gridDim.x)
-  {
-    for(GraphElem k = jstart; k < jend; k++)
-    {
-      if (d_edge_list[k] == d_edge_list[i])
-        count++;
-    }
-  }
-  
-  __syncthreads();
-
-  if (threadIdx.x == 0)
-    atomicAdd((unsigned long long int*)d_local_count, count);
-}
  void local_count_gpu_recv
 (
  const GraphElem start,
@@ -129,127 +97,65 @@ __global__
   void local_count_gpu_recv_kernel
 (
  const GraphElem count,
- const GraphElem end,
- const GraphElem jstart,
- const GraphElem jend,
- const GraphElem* __restrict__ d_recv_buf,
+ const GraphElem nv,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_rbuf,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
- GraphElem* __restrict__ d_local_count
+ GraphElem* __restrict__ d_local_count,
+ GraphElem* __restrict__ d_in_ghosts
  )
 {
-  __shared__ GraphElem count;
+  __shared__ GraphElem sdata[BLOCKDIM03], tdata[BLOCKDIM03];
+  GraphElem tid = threadIdx.x;
+  sdata[tid] = 0;
 
-  if (threadIdx.x == 0)
-    count = 0;
-  __syncthreads();
-
-  GraphElem i = blockDim.x * blockIdx.x + threadIdx.x; 
-  
-  while (i < count)
+  __shared__ GraphElem range[2];
+  for(GraphElem i = blockIdx.x; i < count; i += gridDim.x)
   {
-            if (rbuf_[p*bufsize_+k] == -1)
-              {
-                k += 1;
-                prev = k;
-                continue;
-              }
+    if(threadIdx.x < 2)
+      range[threadIdx.x] = d_indices[d_rbuf[i]-base+threadIdx.x];
+    __syncthreads();
 
-              tup[0] = rbuf_[p*bufsize_+k];
-              GraphElem curr_count = 0;
+    GraphElem start = range[0];
+    GraphElem end = range[1];
 
-              for (GraphElem m = k + 1; m < count; m++)
-              {
-                if (rbuf_[p*bufsize_+m] == -1)
-                {
-                  curr_count = m + 1;
-                  break;
-                }
-
-                tup[1] = rbuf_[p*bufsize_+m];
-
-#if defined(RECV_MAP)
-                check_rmap(tup);
-#else
-#if defined(USE_OPENMP_NESTED)
-                if (check_edgelist_omp(tup))
-                  ntriangles_ += 1;
-#else
-#if defined(FAST_CHECK_EDGELIST)
-                if (fast_check_edgelist(tup))
-#else
-                if (check_edgelist(tup))
-#endif
-                  ntriangles_ += 1;
-#endif
-#endif
-                in_nghosts_ -= 1;
-                recv_count_[source] -= 1;
-              }
-
-              k += (curr_count - prev);
-              prev = k;
-            }
-
-    for(GraphElem k = jstart; k < jend; k++)
+    for(GraphElem e = start+threadIdx.x; e < end; e += blockDim.x)
     {
-      if (d_edge_list[k] == d_edge_list[i])
-        count++;
+      for (GraphElem k = i+1; k < count; k++)
+      {
+        if (d_edge_list[e] == d_rbuf[k])
+          sdata[tid]++;
+        tdata[tid]++;
+      }
     }
-    i +=  blockDim.x*gridDim.x;
   }
 
-  if (threadIdx.x == 0)
-    *d_local_count += count; 
   __syncthreads();
+
+  for (GraphElem s=blockDim.x/2; s>32; s>>=1) 
+  {
+    if (tid < s)
+    {
+      sdata[tid] += sdata[tid + s];
+      tdata[tid] += tdata[tid + s];
+    }
+    __syncthreads();
+  }
+
+  if (tid < 32)
+  { 
+    unroll_last_warp(sdata, tid);
+    unroll_last_warp(tdata, tid);
+  }
+
+  if (tid == 0)
+  { 
+    atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
+    atomicAdd((unsigned long long int*)d_in_ghosts, tdata[0]);
+  }
 }
 #endif
-/*
-  for (GraphElem k = 0; k < count;)
-            {
-              if (rbuf_[p*bufsize_+k] == -1)
-              {
-                k += 1;
-                prev = k;
-                continue;
-              }
-
-              tup[0] = rbuf_[p*bufsize_+k];
-              GraphElem curr_count = 0;
-
-              for (GraphElem m = k + 1; m < count; m++)
-              {
-                if (rbuf_[p*bufsize_+m] == -1)
-                {
-                  curr_count = m + 1;
-                  break;
-                }
-
-                tup[1] = rbuf_[p*bufsize_+m];
-
-#if defined(RECV_MAP)
-                check_rmap(tup);
-#else
-#if defined(USE_OPENMP_NESTED)
-                if (check_edgelist_omp(tup))
-                  ntriangles_ += 1;
-#else
-#if defined(FAST_CHECK_EDGELIST)
-                if (fast_check_edgelist(tup))
-#else
-                if (check_edgelist(tup))
-#endif
-                  ntriangles_ += 1;
-#endif
-#endif
-                in_nghosts_ -= 1;
-                recv_count_[source] -= 1;
-              }
-
-              k += (curr_count - prev);
-              prev = k;
-            }
-*/
 
 void local_count_cpu
 (
