@@ -71,64 +71,75 @@ __global__
 }
 
 
-#if 0
  void local_count_gpu_recv
 (
- const GraphElem start,
- const GraphElem end,
- const GraphElem jstart,
- const GraphElem jend,
- GraphElem* __restrict__ d_recv_buf,
- const GraphElem* __restrict__ d_edge_list,
- GraphElem* __restrict__ d_local_count
- )
-{
-  //GraphElem nblocks = (end - start) > MAX_GRIDDIM ? MAX_GRIDDIM : (end - start); 
-  //local_count_gpu_kernel<<<nblocks, GRIDDIM>>>(start, end, jstart, jend, d_edge_list, d_local_count);
-  GraphElem range = std::ceil((end - start) / 2)*2;
-  if (range < BLOCKDIM04)
-    range = BLOCKDIM04;
-  GraphElem nblocks = (range / BLOCKDIM04) > MAX_GRIDDIM ? MAX_GRIDDIM : (range / BLOCKDIM04);
-    
-  local_count_gpu_recv_kernel<<<nblocks, BLOCKDIM04>>>(start, end, jstart, jend, d_edge_list, d_local_count);
-}
-
-__global__
-  void local_count_gpu_recv_kernel
-(
  const GraphElem count,
- const GraphElem nv,
  const GraphElem base,
  const GraphElem* __restrict__ d_rbuf,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count,
- GraphElem* __restrict__ d_in_ghosts
+ GraphElem* __restrict__ d_in_count
  )
 {
-  __shared__ GraphElem sdata[BLOCKDIM03], tdata[BLOCKDIM03];
+  GraphElem nblocks = (count + BLOCKDIM03 - 1) / BLOCKDIM03;
+  local_count_gpu_recv_kernel<<<nblocks, BLOCKDIM03>>>(count, base, d_rbuf,
+      d_indices, d_edge_list, d_local_count, d_in_count);
+}
+
+__global__
+void local_count_gpu_recv_kernel
+(
+ const GraphElem count,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_rbuf,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count,
+ GraphElem* __restrict__ d_in_count
+ )
+{
+  __shared__ GraphElem sdata[BLOCKDIM03];
   GraphElem tid = threadIdx.x;
   sdata[tid] = 0;
+  GraphElem tup[2] = {-1,-1}, prev = 0, in_count_tid = 0;
 
-  __shared__ GraphElem range[2];
-  for(GraphElem i = blockIdx.x; i < count; i += gridDim.x)
+  for (GraphElem k = 0; k < count;)
   {
-    if(threadIdx.x < 2)
-      range[threadIdx.x] = d_indices[d_rbuf[i]-base+threadIdx.x];
-    __syncthreads();
-
-    GraphElem start = range[0];
-    GraphElem end = range[1];
-
-    for(GraphElem e = start+threadIdx.x; e < end; e += blockDim.x)
+    if (d_rbuf[k] == -1)
     {
-      for (GraphElem k = i+1; k < count; k++)
-      {
-        if (d_edge_list[e] == d_rbuf[k])
-          sdata[tid]++;
-        tdata[tid]++;
-      }
+      k += 1;
+      prev = k;
+      continue;
     }
+
+    tup[0] = d_rbuf[k];
+    GraphElem curr_count = 0;
+
+    for (GraphElem m = k + 1; m < count; m++)
+    {
+      if (d_rbuf[m] == -1)
+      {
+        curr_count = m + 1;
+        break;
+      }
+
+      tup[1] = d_rbuf[m];
+
+      const GraphElem start = d_indices[tup[0]-base];
+      const GraphElem end = d_indices[tup[0]-base+1];
+
+      for(GraphElem e = start+tid; e < end; e += blockDim.x)
+      {
+        if (d_edge_list[e] == tup[1])
+          sdata[tid]++;
+      }
+
+      in_count_tid += 1;
+    }
+
+    k += (curr_count - prev);
+    prev = k;
   }
 
   __syncthreads();
@@ -136,26 +147,19 @@ __global__
   for (GraphElem s=blockDim.x/2; s>32; s>>=1) 
   {
     if (tid < s)
-    {
       sdata[tid] += sdata[tid + s];
-      tdata[tid] += tdata[tid + s];
-    }
     __syncthreads();
   }
 
   if (tid < 32)
-  { 
     unroll_last_warp(sdata, tid);
-    unroll_last_warp(tdata, tid);
-  }
 
   if (tid == 0)
   { 
     atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
-    atomicAdd((unsigned long long int*)d_in_ghosts, tdata[0]);
+    *d_in_count = in_count_tid;
   }
 }
-#endif
 
 void local_count_cpu
 (
