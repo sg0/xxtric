@@ -73,6 +73,7 @@ __global__
 
  void local_count_gpu_recv
 (
+ const GraphElem length,
  const GraphElem count,
  const GraphElem base,
  const GraphElem* __restrict__ d_rbuf,
@@ -82,8 +83,8 @@ __global__
  GraphElem* __restrict__ d_in_count
  )
 {
-  GraphElem nblocks = (count + BLOCKDIM03 - 1) / BLOCKDIM03;
-  local_count_gpu_recv_kernel<<<nblocks, BLOCKDIM03>>>(count, base, d_rbuf,
+  GraphElem nblocks = (length + BLOCKDIM03 - 1) / BLOCKDIM03;
+  local_count_gpu_recv_kernel<<<nblocks, 2*BLOCKDIM03>>>(count, base, d_rbuf,
       d_indices, d_edge_list, d_local_count, d_in_count);
 }
 
@@ -99,11 +100,17 @@ void local_count_gpu_recv_kernel
  GraphElem* __restrict__ d_in_count
  )
 {
-  __shared__ GraphElem sdata[BLOCKDIM03];
   GraphElem tid = threadIdx.x;
-  sdata[tid] = 0;
-  GraphElem tup[2] = {-1,-1}, prev = 0, in_count_tid = 0;
+  GraphElem index = blockDim.x*blockIdx.x+tid;
+  GraphElem stride = blockDim.x*gridDim.x;
 
+  __shared__ GraphElem sdata[2*BLOCKDIM03];
+  sdata[tid] = 0;
+  sdata[tid + BLOCKDIM03] = 0;
+  GraphElem prev = 0;
+  
+  __syncthreads();
+  
   for (GraphElem k = 0; k < count;)
   {
     if (d_rbuf[k] == -1)
@@ -113,7 +120,6 @@ void local_count_gpu_recv_kernel
       continue;
     }
 
-    tup[0] = d_rbuf[k];
     GraphElem curr_count = 0;
 
     for (GraphElem m = k + 1; m < count; m++)
@@ -124,18 +130,16 @@ void local_count_gpu_recv_kernel
         break;
       }
 
-      tup[1] = d_rbuf[m];
+      const GraphElem start = d_indices[d_rbuf[k]-base];
+      const GraphElem end = d_indices[d_rbuf[m]-base+1];
 
-      const GraphElem start = d_indices[tup[0]-base];
-      const GraphElem end = d_indices[tup[0]-base+1];
-
-      for(GraphElem e = start+tid; e < end; e += blockDim.x)
+      for(GraphElem e = start+index; e < end; e += stride)
       {
-        if (d_edge_list[e] == tup[1])
+        if (d_edge_list[e] == d_rbuf[m])
           sdata[tid]++;
       }
-
-      in_count_tid += 1;
+  
+      sdata[tid + BLOCKDIM03]++;
     }
 
     k += (curr_count - prev);
@@ -147,17 +151,23 @@ void local_count_gpu_recv_kernel
   for (GraphElem s=blockDim.x/2; s>32; s>>=1) 
   {
     if (tid < s)
+    {
       sdata[tid] += sdata[tid + s];
+      sdata[tid + BLOCKDIM03] += sdata[tid + BLOCKDIM03 + s];
+    }
     __syncthreads();
   }
 
   if (tid < 32)
+  {
     unroll_last_warp(sdata, tid);
+    unroll_last_warp(sdata + BLOCKDIM03, tid);
+  }
 
   if (tid == 0)
   { 
-    atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
-    *d_in_count = in_count_tid;
+    *d_local_count += sdata[0];
+    *d_in_count += sdata[BLOCKDIM03];
   }
 }
 

@@ -62,7 +62,7 @@ class TriangleCounting
   public:
 
     TriangleCounting(Graph* g, const GraphElem bufsize): 
-      g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), 
+      g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), max_nedges_(0), 
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
@@ -92,6 +92,9 @@ class TriangleCounting
     {
       GraphElem e0, e1;
       g_->edge_range(i, e0, e1);
+
+      if (max_nedges_ < (e1-e0+1))
+        max_nedges_ = e1-e0+1;
 
       if ((e0 + 1) == e1)
         continue;
@@ -457,19 +460,18 @@ class TriangleCounting
 
         if (over)
         { 
-          GraphElem in_count = 0;
-          int count = 0;
+          GraphElem in_count = 0, count = 0;
 
           const int source = status.MPI_SOURCE;
 
-          MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
+          MPI_Get_count(&status, MPI_GRAPH_TYPE, (int*)&count);
 
           if (source != MPI_ANY_SOURCE)
           {
             CudaMemset(d_in_count_, 0, sizeof(GraphElem));
             CudaMemcpyHtoD(&rbuf_[p*bufsize_], d_rbuf_, count*sizeof(GraphElem));
 
-            local_count_gpu_recv_kernel(count, g_->get_base(rank_), d_rbuf_, d_eind_, d_elst_, d_ntriangles_, d_in_count_);
+            local_count_gpu_recv(max_nedges_, count, g_->get_base(rank_), d_rbuf_, d_eind_, d_elst_, d_ntriangles_, d_in_count_);
             CudaDeviceSynchronize();
             CudaMemcpyDtoH(&in_count, d_in_count_, sizeof(GraphElem));
 
@@ -558,7 +560,7 @@ class TriangleCounting
   private:
     Graph* g_;
 
-    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_;
+    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_, max_nedges_;
     GraphElem *sbuf_, *rbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     
     GraphElem *d_eind_, *d_elst_, *d_rbuf_, *d_ntriangles_, *d_in_count_; // device

@@ -167,6 +167,7 @@ void unroll_last_warp
 
  void local_count_gpu_recv
 (
+ const GraphElem length,
  const GraphElem count,
  const GraphElem base,
  const GraphElem* __restrict__ d_rbuf,
