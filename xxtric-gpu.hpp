@@ -64,10 +64,13 @@ class TriangleCounting
     TriangleCounting(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), max_nedges_(0), 
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
-      nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
+      nghosts_(0), out_nghosts_(0), in_nghosts_(0), in_count_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
       recv_count_(nullptr), rindex_(0), rdegree_(0), d_eind_(nullptr), d_elst_(nullptr), 
       d_rbuf_(nullptr), d_ntriangles_(nullptr), d_in_count_(nullptr)
+#if defined(USE_CPU_RECV)
+      , etails_(0)
+#endif
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -81,8 +84,12 @@ class TriangleCounting
     erange_ = new GraphElem[nv*2]();
     GraphElem *send_count  = new GraphElem[size_]();
     recv_count_  = new GraphElem[size_]();
-    
+
+#if defined(USE_CPU_RECV)
+    etails_.resize(lne);
+#else
     std::vector<GraphElem> etails(lne);
+#endif
 
     double t0 = MPI_Wtime();
 
@@ -102,7 +109,11 @@ class TriangleCounting
       for (GraphElem m = e0; m < e1; m++)
       {
         Edge const& edge_m = g_->get_edge(m);
+#if defined(USE_CPU_RECV)
+        etails_[m] = edge_m.tail_;
+#else
         etails[m] = edge_m.tail_;
+#endif
       }
 
       Edge const& edge_s = g_->get_edge(e0);
@@ -123,7 +134,11 @@ class TriangleCounting
     CudaMalloc(d_in_count_, sizeof(GraphElem));
 
     CudaMemcpyHtoD(d_eind_, g_->edge_indices_.data(), (lnv+1)*sizeof(GraphElem));
+#if defined(USE_CPU_RECV)
+    CudaMemcpyHtoD(d_elst_, etails_.data(), lne*sizeof(GraphElem));
+#else
     CudaMemcpyHtoD(d_elst_, etails.data(), lne*sizeof(GraphElem));
+#endif
     CudaMemset(d_ntriangles_, 0, sizeof(GraphElem));
     CudaMemset(d_in_count_, 0, sizeof(GraphElem));
 
@@ -149,7 +164,11 @@ class TriangleCounting
         {
           GraphElem jstart, jend;
           g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
+#if defined(USE_CPU_RECV)
+          local_count_cpu(m+1, e1, jstart, jend, etails_.data(), &ntriangles_);
+#else
           local_count_gpu(m+1, e1, jstart, jend, d_elst_, d_ntriangles_);
+#endif
         }
         else
         {
@@ -176,6 +195,7 @@ class TriangleCounting
       }
     }
         
+    CudaDeviceSynchronize();
     double t1 = MPI_Wtime();
         
     double p_tot = t1 - t0, t_tot = 0.0, t_max = 0.0, t_min = 0.0;
@@ -281,6 +301,10 @@ class TriangleCounting
       CudaFree(d_rbuf_);
       CudaFree(d_ntriangles_);
       CudaFree(d_in_count_);
+
+#if defined(USE_CPU_RECV)
+      etails_.clear();
+#endif
 
       pindex_.clear();
       targets_.clear();
@@ -451,6 +475,8 @@ class TriangleCounting
       if (in_nghosts_ == 0)
         return;
 
+      GraphElem base = g_->get_base(rank_);
+      
       for (int p = 0; p < rdegree_; p++)
       {
         int over = -1;
@@ -460,23 +486,26 @@ class TriangleCounting
 
         if (over)
         { 
-          GraphElem in_count = 0, count = 0;
-
+          in_count_ = 0;
+          GraphElem count = 0;
           const int source = status.MPI_SOURCE;
-
           MPI_Get_count(&status, MPI_GRAPH_TYPE, (int*)&count);
 
           if (source != MPI_ANY_SOURCE)
           {
+#if defined(USE_CPU_RECV)
+            local_count_cpu_recv_kernel(count, base, &rbuf_[p*bufsize_], g_->edge_indices_.data(), etails_.data(), ntriangles_, in_count_);
+#else
             CudaMemset(d_in_count_, 0, sizeof(GraphElem));
             CudaMemcpyHtoD(&rbuf_[p*bufsize_], d_rbuf_, count*sizeof(GraphElem));
 
-            local_count_gpu_recv(max_nedges_, count, g_->get_base(rank_), d_rbuf_, d_eind_, d_elst_, d_ntriangles_, d_in_count_);
+            local_count_gpu_recv(max_nedges_, count, base, d_rbuf_, d_eind_, d_elst_, d_ntriangles_, d_in_count_);
             CudaDeviceSynchronize();
-            CudaMemcpyDtoH(&in_count, d_in_count_, sizeof(GraphElem));
+            CudaMemcpyDtoH(&in_count_, d_in_count_, sizeof(GraphElem));
+#endif
 
-            in_nghosts_ -= in_count;
-            recv_count_[source] -= in_count;
+            in_nghosts_ -= in_count_;
+            recv_count_[source] -= in_count_;
 
             nbrecv(source);
           }
@@ -545,8 +574,11 @@ class TriangleCounting
 #endif
       }
     
+#if defined(USE_CPU_RECV)
+#else
       CudaDeviceSynchronize();
       CudaMemcpyDtoH(&ntriangles_, d_ntriangles_, sizeof(GraphElem));
+#endif
 
       GraphElem ttc = 0, ltc = ntriangles_;
       MPI_Barrier(comm_);
@@ -560,9 +592,11 @@ class TriangleCounting
   private:
     Graph* g_;
 
-    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_, max_nedges_;
+    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_, max_nedges_, in_count_;
     GraphElem *sbuf_, *rbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
-    
+#if defined(USE_CPU_RECV)
+    std::vector<GraphElem> etails_;
+#endif   
     GraphElem *d_eind_, *d_elst_, *d_rbuf_, *d_ntriangles_, *d_in_count_; // device
     
     MPI_Request *sreq_, *rreq_;

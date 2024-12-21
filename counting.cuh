@@ -189,7 +189,7 @@ __global__
  GraphElem* __restrict__ d_in_count
  );
 
-/// CPU kernel
+/// CPU kernels
 void local_count_cpu
 (
  GraphElem start,
@@ -198,6 +198,17 @@ void local_count_cpu
  GraphElem jend,
  GraphElem* __restrict__ edge_list,
  GraphElem* d_local_count 
+ );
+
+void local_count_cpu_recv_kernel
+(
+ const GraphElem count,
+ const GraphElem base,
+ const GraphElem* __restrict__ rbuf,
+ const GraphElem* __restrict__ indices,
+ const GraphElem* __restrict__ edge_list,
+ GraphElem& local_count,
+ GraphElem& in_count
  );
 
 #endif

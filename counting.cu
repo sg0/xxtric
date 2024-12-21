@@ -107,7 +107,7 @@ void local_count_gpu_recv_kernel
   __shared__ GraphElem sdata[2*BLOCKDIM03];
   sdata[tid] = 0;
   sdata[tid + BLOCKDIM03] = 0;
-  GraphElem prev = 0;
+  GraphElem prev = 0, tup[2] = {-1, -1};
   
   __syncthreads();
   
@@ -121,6 +121,7 @@ void local_count_gpu_recv_kernel
     }
 
     GraphElem curr_count = 0;
+    tup[0] = d_rbuf[k];
 
     for (GraphElem m = k + 1; m < count; m++)
     {
@@ -130,12 +131,13 @@ void local_count_gpu_recv_kernel
         break;
       }
 
-      const GraphElem start = d_indices[d_rbuf[k]-base];
-      const GraphElem end = d_indices[d_rbuf[m]-base+1];
+      tup[1] = d_rbuf[m];
+      const GraphElem start = d_indices[tup[0]-base];
+      const GraphElem end = d_indices[tup[0]-base+1];
 
       for(GraphElem e = start+index; e < end; e += stride)
       {
-        if (d_edge_list[e] == d_rbuf[m])
+        if (d_edge_list[e] == tup[1])
           sdata[tid]++;
       }
   
@@ -166,11 +168,16 @@ void local_count_gpu_recv_kernel
 
   if (tid == 0)
   { 
-    *d_local_count += sdata[0];
-    *d_in_count += sdata[BLOCKDIM03];
+    //*d_local_count += sdata[0];
+    //*d_in_count += sdata[BLOCKDIM03];
+    atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
+    atomicAdd((unsigned long long int*)d_in_count, sdata[BLOCKDIM03]);
   }
 }
 
+/// CPU kernels
+
+// local counting
 void local_count_cpu
 (
  const GraphElem start,
@@ -191,4 +198,54 @@ void local_count_cpu
     }
 }
 
+// local counting after receiving
+void local_count_cpu_recv_kernel
+(
+ const GraphElem count,
+ const GraphElem base,
+ const GraphElem* __restrict__ rbuf,
+ const GraphElem* __restrict__ indices,
+ const GraphElem* __restrict__ edge_list,
+ GraphElem& local_count,
+ GraphElem& in_count
+ )
+{
+  GraphElem prev = 0, tup[2] = {-1, -1};
+  
+  for (GraphElem k = 0; k < count;)
+  {
+    if (rbuf[k] == -1)
+    {
+      k += 1;
+      prev = k;
+      continue;
+    }
 
+    GraphElem curr_count = 0;
+    tup[0] = rbuf[k];
+    
+    for (GraphElem m = k + 1; m < count; m++)
+    { 
+      if (rbuf[m] == -1)
+      {
+        curr_count = m + 1;
+        break;
+      }
+      
+      tup[1] = rbuf[m];
+      const GraphElem start = indices[tup[0]-base];
+      const GraphElem end = indices[tup[0]-base+1];
+
+      for(GraphElem e = start; e < end; e++)
+      {
+        if (edge_list[e] == tup[1])
+          local_count++;
+      }
+  
+      in_count++;
+    }
+
+    k += (curr_count - prev);
+    prev = k;
+  }
+}
