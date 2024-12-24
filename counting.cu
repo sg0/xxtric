@@ -57,6 +57,9 @@ void local_count_gpu_kernel
         {
           for(GraphElem j = jstart; j < jend; j++)
           {
+            if (d_edge_list[j] > d_edge_list[n])
+              break;
+
             if (d_edge_list[n] == d_edge_list[j])
               sdata[tid]++;
           }
@@ -181,22 +184,24 @@ void local_count_gpu_recv_kernel
     
   __syncthreads();
  
-  for (GraphElem i = bid; i < count; i += step)
+  for (GraphElem i = bid; i < count/2; i += step)
   {
-    if (i % 2 == 0)
+    const GraphElem ind = 2*i;
+    
+    if(tid < 2)
+      range[tid] = d_indices[d_rbuf[ind]-base+tid];
+    __syncthreads();
+
+    const GraphElem start = range[0];
+    const GraphElem end = range[1];
+
+    for(GraphElem k = start + tid; k < end; k += blocksize)
     {
-      if(tid < 2)
-        range[tid] = d_indices[d_rbuf[i]-base+tid];
-      __syncthreads();
+      if (d_edge_list[k] > d_rbuf[ind+1])
+        break;
 
-      const GraphElem start = range[0];
-      const GraphElem end = range[1];
-
-      for(GraphElem k = start + tid; k < end; k += blocksize)
-      {
-        if (d_edge_list[k] == d_rbuf[i+1])
-          sdata[tid]++;
-      }
+      if (d_edge_list[k] == d_rbuf[ind+1])
+        sdata[tid]++;
     }
   }
 

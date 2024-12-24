@@ -129,7 +129,7 @@ class TriangleCounting
     /// Data requirements for remote counting
     for (GraphElem i = 0; i < lnv; i++)
     {
-      GraphElem e0, e1, tup[2];
+      GraphElem e0, e1;
 
       g_->edge_range(i, e0, e1);
       const GraphElem global_i = g_->local_to_global(i);
