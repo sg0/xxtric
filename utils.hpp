@@ -55,6 +55,13 @@ extern unsigned seed;
 int is_pwr2(int nprocs) 
 { return ((nprocs != 0) && !(nprocs & (nprocs - 1))); }
 
+GraphElem pwr2(GraphElem num)
+{
+  if (!((num != 0) && !(num & (num - 1))))
+    return std::pow(2, std::ceil(log2(num)));
+  return num;
+}
+
 // round to multiple of mult
 GraphElem roundUp(GraphElem num, GraphElem mult)
 {

@@ -167,15 +167,13 @@ void unroll_last_warp
 
  void local_count_gpu_recv
 (
- const GraphElem length,
  const GraphElem count,
  const GraphElem base,
  const GraphElem* __restrict__ d_rbuf,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
- GraphElem* __restrict__ d_local_count,
- GraphElem* __restrict__ d_in_count
- );
+ GraphElem* __restrict__ d_local_count 
+);
 
 __global__
   void local_count_gpu_recv_kernel
@@ -185,8 +183,7 @@ __global__
  const GraphElem* __restrict__ d_rbuf,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
- GraphElem* __restrict__ d_local_count,
- GraphElem* __restrict__ d_in_count
+ GraphElem* __restrict__ d_local_count
  );
 
 /// CPU kernels
@@ -200,15 +197,13 @@ void local_count_cpu
  GraphElem* d_local_count 
  );
 
-void local_count_cpu_recv_kernel
+void local_count_cpu_recv
 (
  const GraphElem count,
  const GraphElem base,
  const GraphElem* __restrict__ rbuf,
  const GraphElem* __restrict__ indices,
  const GraphElem* __restrict__ edge_list,
- GraphElem& local_count,
- GraphElem& in_count
+ GraphElem* __restrict__ local_count
  );
-
 #endif
