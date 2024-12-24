@@ -123,10 +123,14 @@ class TriangleCounting
     
     CudaMemset(d_ntriangles_, 0, sizeof(GraphElem));
 
+    /// Local counting
+    local_count_gpu(lnv, base, g_->get_bound(rank_), d_eind_, d_elst_, d_ntriangles_);
+
+    /// Data requirements for remote counting
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];
-      
+
       g_->edge_range(i, e0, e1);
       const GraphElem global_i = g_->local_to_global(i);
 
@@ -139,35 +143,26 @@ class TriangleCounting
         const int owner = g_->get_owner(edge_m.tail_);
 
         if (global_i > edge_m.tail_)
-            continue;
+          continue;
 
-        if (owner == rank_)
+        if (owner > rank_)
         {
-          GraphElem jstart, jend;
-          g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
-          local_count_gpu(m+1, e1, jstart, jend, d_elst_, d_ntriangles_);
-        }
-        else
-        {
-            if (owner > rank_)
-            {
-                for (GraphElem n = m + 1; n < e1; n++)
-                {
-                    Edge const& edge_n = g_->get_edge(n);
-                
-                    if (edge_m.tail_ > edge_n.tail_)
-                      continue;
+          for (GraphElem n = m + 1; n < e1; n++)
+          {
+            Edge const& edge_n = g_->get_edge(n);
 
-                    if (!edge_within_max(edge_m.tail_, edge_n.tail_))
-                        break;
+            if (edge_m.tail_ > edge_n.tail_)
+              continue;
 
-                    if (!edge_above_min(edge_m.tail_, edge_n.tail_))
-                        continue;
+            if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+              break;
 
-                    send_count[owner] += 2;
-                    vcount_[i] += 1;
-                }
-            }
+            if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+              continue;
+
+            send_count[owner] += 2;
+            vcount_[i] += 1;
+          }
         }
       }
     }

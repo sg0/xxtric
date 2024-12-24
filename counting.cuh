@@ -137,7 +137,28 @@ CudaCall(cudaDeviceSynchronize())
 #define MAX_CUDA_STREAMS (8)
 #endif
 
- void local_count_gpu
+void local_count_gpu
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem bound,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+
+__global__  
+void local_count_gpu_kernel
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem bound,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+
+ void local_count_gpu_inner
 (
  const GraphElem start,
  const GraphElem end,
@@ -148,7 +169,7 @@ CudaCall(cudaDeviceSynchronize())
  );
 
 __global__
-  void local_count_gpu_kernel
+  void local_count_gpu_inner_kernel
 (
  const GraphElem start,
  const GraphElem end,
@@ -187,7 +208,7 @@ __global__
  );
 
 /// CPU kernels
-void local_count_cpu
+void local_count_cpu_inner
 (
  GraphElem start,
  GraphElem end,
