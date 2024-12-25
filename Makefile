@@ -13,11 +13,6 @@ TARGET = tric
 
 all: $(TARGET)
 
-ENABLE_OPENMP=0
-ifeq ($(ENABLE_OPENMP),1)
-CXXFLAGS += -fopenmp -DUSE_OPENMP
-endif
-
 ENABLE_SHMEM=0
 ifeq ($(ENABLE_SHMEM), 1)
 CXX = CC
@@ -27,13 +22,18 @@ endif
 ENABLE_CUDA=0
 ifeq ($(ENABLE_CUDA),1)
 NVCXX = nvcc
-MPI_PATH = /opt/cray/pe/mpich/8.1.28/ofi/nvidia/23.3
-CUDA_PATH = /opt/nvidia/hpc_sdk/Linux_x86_64/23.9/cuda/12.2
+MPI_PATH = /share/apps/openmpi/5.0.5/gcc/12.2.0
+CUDA_PATH = /share/apps/cuda/12.3
 CXXFLAGS += -DUSE_CUDA
-CUDA_CXXFLAGS = -gencode arch=compute_80,code=sm_80 
+CUDA_CXXFLAGS = -gencode arch=compute_90,code=sm_90 
 INCLUDE += -I$(MPI_PATH)/include -I$(CUDA_PATH)/include 
 LDFLAGS += -lm -lrt -ldl -L$(MPI_PATH)/lib -lmpi -L$(CUDA_PATH)/lib64 -lcudart
 OBJ += counting.o
+endif
+
+ENABLE_OPENMP=0
+ifeq ($(ENABLE_OPENMP)$(ENABLE_CUDA),1)
+CXXFLAGS += -Xcompiler -fopenmp -DUSE_OPENMP
 endif
 
 ENABLE_TAUPROF=0

@@ -127,6 +127,9 @@ class TriangleCounting
     local_count_gpu(lnv, base, g_->get_bound(rank_), d_eind_, d_elst_, d_ntriangles_);
 
     /// Data requirements for remote counting
+#if defined(USE_OPENMP)
+#pragma omp parallel for schedule(dynamic) default(shared)
+#endif
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1;
@@ -160,6 +163,9 @@ class TriangleCounting
             if (!edge_above_min(edge_m.tail_, edge_n.tail_))
               continue;
 
+#if defined(USE_OPENMP)
+#pragma omp atomic update
+#endif
             send_count[owner] += 2;
             vcount_[i] += 1;
           }
@@ -290,6 +296,9 @@ class TriangleCounting
 
     inline void nbsend()
     {
+#if defined(USE_OPENMP)
+#pragma omp parallel for default(shared)
+#endif
       for (int p = 0; p < pdegree_; p++)
         nbsend(targets_[p]);
     }
@@ -305,6 +314,9 @@ class TriangleCounting
 
     inline void nbrecv()
     {
+#if defined(USE_OPENMP)
+#pragma omp parallel for default(shared)
+#endif
       for (int p = 0; p < rdegree_; p++)
         nbrecv(sources_[p]);
     }
@@ -428,6 +440,9 @@ class TriangleCounting
 
       GraphElem base = g_->get_base(rank_);
       
+#if defined(USE_OPENMP)
+#pragma omp parallel for default(shared) reduction(-:in_nghosts_)
+#endif
       for (GraphElem p = 0; p < rdegree_; p++)
       {
         int over = -1;
