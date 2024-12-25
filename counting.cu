@@ -57,9 +57,6 @@ void local_count_gpu_kernel
         {
           for(GraphElem j = jstart; j < jend; j++)
           {
-            if (d_edge_list[j] > d_edge_list[n])
-              break;
-
             if (d_edge_list[n] == d_edge_list[j])
               sdata[tid]++;
           }
@@ -197,9 +194,6 @@ void local_count_gpu_recv_kernel
 
     for(GraphElem k = start + tid; k < end; k += blocksize)
     {
-      if (d_edge_list[k] > d_rbuf[ind+1])
-        break;
-
       if (d_edge_list[k] == d_rbuf[ind+1])
         sdata[tid]++;
     }
