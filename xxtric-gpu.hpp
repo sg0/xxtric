@@ -457,16 +457,19 @@ class TriangleCounting
           const int source = rstat.MPI_SOURCE;
           MPI_Get_count(&rstat, MPI_GRAPH_TYPE, (int*)&count);
 
-          CudaMemcpyHtoD(d_rbuf_, &rbuf_[p*bufsize_], count*sizeof(GraphElem));
-          local_count_gpu_recv(count, base, d_rbuf_, d_eind_, d_elst_, d_ntriangles_);
+          if (source != MPI_ANY_SOURCE)
+          {
+            CudaMemcpyHtoD(d_rbuf_, &rbuf_[p*bufsize_], count*sizeof(GraphElem));
+            local_count_gpu_recv(count, base, d_rbuf_, d_eind_, d_elst_, d_ntriangles_);
 
-          in_nghosts_ -= count;
+            in_nghosts_ -= count;
 #if defined(USE_OPENMP)
 #pragma omp atomic update
 #endif
-          recv_count_[source] -= count;
+            recv_count_[source] -= count;
 
-          nbrecv(source);
+            nbrecv(source);
+          }
         }
       }
     }
