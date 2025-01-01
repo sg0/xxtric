@@ -1,8 +1,10 @@
 #include "deftypes.hpp"
 #include "counting.cuh"
 
+#if defined(USE_CUDA_CG)
 #include <cooperative_groups.h> 
 namespace cg = cooperative_groups;
+#endif
 
 void local_count_gpu
 (
@@ -163,6 +165,67 @@ __global__
       d_indices, d_edge_list, d_local_count);
 }
 
+#if defined(USE_CUDA_CG)
+__global__
+void local_count_gpu_recv_kernel
+(
+ const GraphElem count,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_rbuf,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+ )
+{
+  const GraphElem tid = threadIdx.x, bid = blockIdx.x, step = gridDim.x;
+  const int WarpSize = 32, BlockSize = BLOCKDIM03;
+  __shared__ GraphElem sdata[BlockSize];
+  __shared__ GraphElem range[(BlockSize/WarpSize)*2];
+
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
+
+  const GraphElem block_tid = block.thread_rank();
+  const GraphElem warp_tid = warp.thread_rank();
+
+  GraphElem* t_range = &range[(block_tid/WarpSize)*2];
+  GraphElem c0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+
+  for (GraphElem i = c0; i < count/2; i += step*(BlockSize/WarpSize))
+  {
+    const GraphElem ind = 2*i;
+    
+    if(warp_tid < 2)
+      t_range[warp_tid] = d_indices[d_rbuf[ind]-base+warp_tid];
+
+    warp.sync();
+
+    const GraphElem start = t_range[0] + warp_tid;
+    const GraphElem end = t_range[1];
+
+    for(GraphElem k = start; k < end; k += WarpSize)
+    {
+      if (d_edge_list[k] == d_rbuf[ind+1])
+        sdata[block_tid]++;
+    }
+    
+    warp.sync();
+  }
+    
+  __syncthreads();
+
+#pragma unroll
+  for (GraphElem i = BlockSize/2; i > 0; i /= 2) 
+  {
+    if (tid < i) 
+      sdata[tid] += sdata[tid + i]; 
+    __syncthreads();
+  }
+
+  if (tid == 0)
+    atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
+}
+#else
 __global__
 void local_count_gpu_recv_kernel
 (
@@ -214,6 +277,7 @@ void local_count_gpu_recv_kernel
   if (tid == 0)
     atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
 }
+#endif
 
 /// CPU kernels
 

@@ -50,6 +50,7 @@
 #include <vector>
 #include <stdexcept>
 #include <string> 
+#include <memory>
 
 #ifndef TAG_DATA
 #define TAG_DATA  (100)
@@ -439,33 +440,33 @@ class TriangleCounting
         return;
 
       GraphElem base = g_->get_base(rank_);
-      
+
 #if defined(USE_OPENMP)
 #pragma omp parallel for default(shared) reduction(-:in_nghosts_)
 #endif
       for (GraphElem p = 0; p < rdegree_; p++)
       {
+        GraphElem count = 0;
         int over = -1;
-        MPI_Status status;
+        MPI_Status rstat;
 
-        MPI_Test(&rreq_[p], &over, &status);
+        MPI_Test(&rreq_[p], &over, &rstat);
 
         if (over)
-        { 
-          GraphElem count = 0;
-          const int source = status.MPI_SOURCE;
-          MPI_Get_count(&status, MPI_GRAPH_TYPE, (int*)&count);
+        {
+          const int source = rstat.MPI_SOURCE;
+          MPI_Get_count(&rstat, MPI_GRAPH_TYPE, (int*)&count);
 
-          if (source != MPI_ANY_SOURCE)
-          {
-            CudaMemcpyHtoD(d_rbuf_, &rbuf_[p*bufsize_], count*sizeof(GraphElem));
-            local_count_gpu_recv(count, base, d_rbuf_, d_eind_, d_elst_, d_ntriangles_);
+          CudaMemcpyHtoD(d_rbuf_, &rbuf_[p*bufsize_], count*sizeof(GraphElem));
+          local_count_gpu_recv(count, base, d_rbuf_, d_eind_, d_elst_, d_ntriangles_);
 
-            in_nghosts_ -= count;
-            recv_count_[source] -= count;
+          in_nghosts_ -= count;
+#if defined(USE_OPENMP)
+#pragma omp atomic update
+#endif
+          recv_count_[source] -= count;
 
-            nbrecv(source);
-          }
+          nbrecv(source);
         }
       }
     }
