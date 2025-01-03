@@ -1,7 +1,8 @@
 #include "deftypes.hpp"
 #include "counting.cuh"
+#include <cassert>
 
-#if defined(USE_CUDA_CG)
+#if defined(USE_CUDA_CG) || defined(USE_CUDA_CG_REDUCE)
 #include <cooperative_groups.h> 
 namespace cg = cooperative_groups;
 #endif
@@ -220,8 +221,7 @@ void local_count_gpu_recv_kernel
       atomicAdd((unsigned long long int*)d_local_count, count);
   }
 }
-
-#if 0
+#elif defined(USE_CUDA_CG_REDUCE)
 __global__
 void local_count_gpu_recv_kernel
 (
@@ -234,20 +234,24 @@ void local_count_gpu_recv_kernel
  )
 {
   const GraphElem tid = threadIdx.x, bid = blockIdx.x, step = gridDim.x;
-  const int WarpSize = 32, BlockSize = BLOCKDIM03;
-  __shared__ GraphElem sdata[BlockSize];
-  __shared__ GraphElem range[(BlockSize/WarpSize)*2];
+  const int WarpSize = 32, BlockSize = BLOCKDIM03, NumWarps = (BlockSize/WarpSize);
+  
+  static_assert(BlockSize % WarpSize == 0, "BlockSize must be a multiple of WarpSize");
+
+  __shared__ GraphElem sdata[NumWarps];
+  __shared__ GraphElem range[NumWarps*2];
 
   cg::thread_block block = cg::this_thread_block();
   cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
 
-  const GraphElem block_tid = block.thread_rank();
-  const GraphElem warp_tid = warp.thread_rank();
+  const int block_tid = block.thread_rank();
+  const int warp_tid = warp.thread_rank();
+  const int tile_id = block_tid/WarpSize;
 
-  GraphElem* t_range = &range[(block_tid/WarpSize)*2];
-  GraphElem c0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
-
-  for (GraphElem i = c0; i < count/2; i += step*(BlockSize/WarpSize))
+  GraphElem* t_range = &range[tile_id*2];
+  GraphElem b0 = tile_id+bid*NumWarps;
+    
+  for (GraphElem i = b0; i < count/2; i += step*NumWarps)
   {
     const GraphElem ind = 2*i;
     
@@ -258,30 +262,35 @@ void local_count_gpu_recv_kernel
 
     const GraphElem start = t_range[0] + warp_tid;
     const GraphElem end = t_range[1];
+    GraphElem warp_count = 0, block_count = 0;
 
     for(GraphElem k = start; k < end; k += WarpSize)
     {
       if (d_edge_list[k] == d_rbuf[ind+1])
-        sdata[block_tid]++;
+        warp_count++;
     }
     
     warp.sync();
-  }
-    
-  __syncthreads();
 
 #pragma unroll
-  for (GraphElem i = BlockSize/2; i > 0; i /= 2) 
-  {
-    if (tid < i) 
-      sdata[tid] += sdata[tid + i]; 
-    __syncthreads();
-  }
+    for(int j = warp.size()/2; j > 0; j /= 2)
+      warp_count += __shfl_down_sync(0xFFFFFFFF, warp_count, j);
+    
+    if (warp_tid == 0) 
+      sdata[tile_id] = warp_count;
 
-  if (tid == 0)
-    atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
+    block.sync();
+
+#pragma unroll
+    for(int w = 0; w < NumWarps; w++)
+      block_count += sdata[w];
+
+    block.sync();
+
+    if (block_tid == 0)
+      atomicAdd((unsigned long long int*)d_local_count, block_count);
+  }
 }
-#endif
 #else
 __global__
 void local_count_gpu_recv_kernel
