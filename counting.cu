@@ -206,11 +206,12 @@ void local_count_gpu_recv_kernel
 
     const GraphElem start = t_range[0] + warp_tid;
     const GraphElem end = t_range[1];
+    const GraphElem edge = d_rbuf[ind+1];
     GraphElem count = 0;
 
     for(GraphElem k = start; k < end; k += WarpSize)
     {
-      if (d_edge_list[k] == d_rbuf[ind+1])
+      if (d_edge_list[k] == edge)
         count++;
     }
     
@@ -255,10 +256,11 @@ void local_count_gpu_recv_kernel
 
     const GraphElem start = range[0];
     const GraphElem end = range[1];
+    const GraphElem edge = d_rbuf[ind+1];
 
     for(GraphElem k = start + tid; k < end; k += blocksize)
     {
-      if (d_edge_list[k] == d_rbuf[ind+1])
+      if (d_edge_list[k] == edge)
         sdata[tid]++;
     }
   }
