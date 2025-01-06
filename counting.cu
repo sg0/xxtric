@@ -2,7 +2,7 @@
 #include "counting.cuh"
 #include <cassert>
 
-#if defined(USE_CUDA_CG) || defined(USE_CUDA_CG_REDUCE)
+#if defined(USE_CUDA_CG)
 #include <cooperative_groups.h> 
 namespace cg = cooperative_groups;
 #endif
@@ -17,10 +17,12 @@ void local_count_gpu
  GraphElem* __restrict__ d_local_count
 )
 {
-  GraphElem nblocks = (lnv + BLOCKDIM03 - 1) / BLOCKDIM03;
-  local_count_gpu_kernel<<<nblocks, BLOCKDIM03>>>(lnv, base, bound, d_indices, d_edge_list, d_local_count);
+  const int blocksize = BLOCKDIM03;
+  GraphElem nblocks = (lnv + blocksize - 1) / blocksize;
+  local_count_gpu_kernel<blocksize><<<nblocks, blocksize>>>(lnv, base, bound, d_indices, d_edge_list, d_local_count);
 }
 
+template <int blocksize>
 __global__  
 void local_count_gpu_kernel
 (
@@ -32,8 +34,8 @@ void local_count_gpu_kernel
  GraphElem* __restrict__ d_local_count
 )
 {
-  GraphElem tid = threadIdx.x, bid = blockIdx.x, blocksize = blockDim.x, step = gridDim.x;
-  volatile __shared__ GraphElem sdata[BLOCKDIM03];
+  GraphElem tid = threadIdx.x, bid = blockIdx.x, step = gridDim.x;
+  volatile __shared__ GraphElem sdata[blocksize];
   __shared__ GraphElem range[2];
   sdata[tid] = 0;
     
@@ -161,12 +163,14 @@ __global__
  GraphElem* __restrict__ d_local_count
  )
 {
-  GraphElem nblocks = (count + BLOCKDIM03 - 1) / BLOCKDIM03;
-  local_count_gpu_recv_kernel<<<nblocks, BLOCKDIM03>>>(count, base, d_rbuf,
+  const int blocksize = BLOCKDIM02;
+  GraphElem nblocks = (count + blocksize - 1) / blocksize;
+  local_count_gpu_recv_kernel<blocksize><<<nblocks, blocksize>>>(count, base, d_rbuf,
       d_indices, d_edge_list, d_local_count);
 }
 
 #if defined(USE_CUDA_CG)
+template <int blocksize>
 __global__
 void local_count_gpu_recv_kernel
 (
@@ -178,8 +182,8 @@ void local_count_gpu_recv_kernel
  GraphElem* __restrict__ d_local_count
  )
 {
-  const GraphElem tid = threadIdx.x, bid = blockIdx.x, step = gridDim.x;
-  const int WarpSize = 32, BlockSize = BLOCKDIM03;
+  const GraphElem bid = blockIdx.x, step = gridDim.x;
+  const int WarpSize = 32, BlockSize = blocksize;
   __shared__ GraphElem range[(BlockSize/WarpSize)*2];
 
   cg::thread_block block = cg::this_thread_block();
@@ -222,6 +226,7 @@ void local_count_gpu_recv_kernel
   }
 }
 #else
+template <int blocksize>
 __global__
 void local_count_gpu_recv_kernel
 (
@@ -233,8 +238,8 @@ void local_count_gpu_recv_kernel
  GraphElem* __restrict__ d_local_count
  )
 {
-  GraphElem tid = threadIdx.x, bid = blockIdx.x, blocksize = blockDim.x, step = gridDim.x;
-  volatile __shared__ GraphElem sdata[BLOCKDIM03];
+  GraphElem tid = threadIdx.x, bid = blockIdx.x, step = gridDim.x;
+  volatile __shared__ GraphElem sdata[blocksize];
   __shared__ GraphElem range[2];
   sdata[tid] = 0;
     
@@ -320,4 +325,3 @@ void local_count_cpu_recv
     }
   }
 }
-
