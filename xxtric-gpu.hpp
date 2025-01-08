@@ -125,6 +125,7 @@ class TriangleCounting
     CudaMemset(d_ntriangles_, 0, sizeof(GraphElem));
 
     /// Local counting
+#if defined(SEPARATE_LOCAL_COUNTING_KERNEL)    
     local_count_gpu(lnv, base, g_->get_bound(rank_), d_eind_, d_elst_, d_ntriangles_);
 
     /// Data requirements for remote counting
@@ -173,7 +174,128 @@ class TriangleCounting
         }
       }
     }
+#elif defined(MASKED_LOCAL_COUNTING_KERNEL)
+    std::vector<GraphElem> local_edge_range;
+    const int stride = 3;
+
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1, tup[2];
+      g_->edge_range(i, e0, e1);
+      const GraphElem global_i = g_->local_to_global(i);
+      
+      if ((e0 + 1) == e1)
+        continue;
+      
+      for (GraphElem m = e0; m < e1-1; m++)
+      {
+        Edge const& edge_m = g_->get_edge(m);
+        const int owner = g_->get_owner(edge_m.tail_);
         
+        if (global_i > edge_m.tail_)
+          continue;
+        
+        if (owner == rank_)
+        {
+          GraphElem id = 0;
+          auto it = std::find_if(local_edge_range.begin(), local_edge_range.end(),
+              [&i, &id, stride](GraphElem const& element)
+              { 
+                 bool found = (id % stride == 0) && (element == i);
+                 id++;
+                 return found;
+              });
+
+          if (it == local_edge_range.end())
+          {
+            local_edge_range.push_back(i);
+            local_edge_range.push_back(m);
+            local_edge_range.push_back(m);
+          }
+          else
+            *(it+stride-1) = m;
+        }
+        else
+        {
+          if (owner > rank_)
+          {
+            for (GraphElem n = m + 1; n < e1; n++)
+            {
+              Edge const& edge_n = g_->get_edge(n);
+
+              if (edge_m.tail_ > edge_n.tail_)
+                continue;
+              if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+                break;
+              if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+                continue;
+
+              send_count[owner] += 2;
+              vcount_[i] += 1;
+            }
+          }
+        }
+      }
+    }
+
+    GraphElem* d_edge_mask = nullptr;
+    const GraphElem llnv = local_edge_range.size()/stride;
+
+    CudaMalloc(d_edge_mask, stride*llnv*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_edge_mask, local_edge_range.data(), stride*llnv*sizeof(GraphElem));
+
+    local_count_gpu_masked(llnv, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_);
+
+    local_edge_range.clear();
+#else
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1, tup[2];
+      g_->edge_range(i, e0, e1);
+      const GraphElem global_i = g_->local_to_global(i);
+      
+      if ((e0 + 1) == e1)
+        continue;
+      
+      for (GraphElem m = e0; m < e1-1; m++)
+      {
+        Edge const& edge_m = g_->get_edge(m);
+        const int owner = g_->get_owner(edge_m.tail_);
+        
+        if (global_i > edge_m.tail_)
+          continue;
+        
+        if (owner == rank_)
+        {
+          GraphElem jstart, jend;
+          g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
+          local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_);
+        }
+        else
+        {
+          if (owner > rank_)
+          {
+            for (GraphElem n = m + 1; n < e1; n++)
+            {
+              Edge const& edge_n = g_->get_edge(n);
+
+              if (edge_m.tail_ > edge_n.tail_)
+                continue;
+              if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+                break;
+              if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+                continue;
+
+              send_count[owner] += 2;
+              vcount_[i] += 1;
+            }
+          }
+        }
+      }
+    }
+#endif
+        
+    CudaDeviceSynchronize();
     double t1 = MPI_Wtime();
         
     double p_tot = t1 - t0, t_tot = 0.0, t_max = 0.0, t_min = 0.0;
@@ -256,6 +378,9 @@ class TriangleCounting
 #endif
     
     delete []send_count;
+#if defined(MASKED_LOCAL_COUNTING_KERNEL)
+    CudaFree(d_edge_mask);
+#endif
   }
 
     ~TriangleCounting() {}
