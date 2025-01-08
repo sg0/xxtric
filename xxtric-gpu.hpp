@@ -229,13 +229,30 @@ class TriangleCounting
     }
 
     GraphElem* d_edge_mask = nullptr;
-    // TODO FIXME erase entries with -1
-    const GraphElem llnv = local_edge_range.size()/3;
+    std::vector<GraphElem> edge_range;
+    edge_range.reserve(lnv*3);
 
+    // erase entries with -1
+    for (GraphElem n = 0; n < 3*lnv; n+=3)
+    {
+      if (local_edge_range[n] == -1)
+        continue;
+      else
+      {
+        edge_range.push_back(local_edge_range[n]);
+        edge_range.push_back(local_edge_range[n+1]);
+        edge_range.push_back(local_edge_range[n+2]);
+      }
+    }
+    
+    const GraphElem llnv = edge_range.size()/3;
     CudaMalloc(d_edge_mask, 3*llnv*sizeof(GraphElem));
-    CudaMemcpyHtoD(d_edge_mask, local_edge_range.data(), 3*llnv*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_edge_mask, edge_range.data(), 3*llnv*sizeof(GraphElem));
 
     local_count_gpu_masked(llnv, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_);
+
+    local_edge_range.clear();
+    edge_range.clear();
 #else
     for (GraphElem i = 0; i < lnv; i++)
     {
