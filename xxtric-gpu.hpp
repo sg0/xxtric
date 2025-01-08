@@ -175,8 +175,7 @@ class TriangleCounting
       }
     }
 #elif defined(MASKED_LOCAL_COUNTING_KERNEL)
-    std::vector<GraphElem> local_edge_range;
-    const int stride = 3;
+    std::vector<GraphElem> local_edge_range(lnv*3,-1);
 
     for (GraphElem i = 0; i < lnv; i++)
     {
@@ -197,23 +196,14 @@ class TriangleCounting
         
         if (owner == rank_)
         {
-          GraphElem id = 0;
-          auto it = std::find_if(local_edge_range.begin(), local_edge_range.end(),
-              [&i, &id, stride](GraphElem const& element)
-              { 
-                 bool found = (id % stride == 0) && (element == i);
-                 id++;
-                 return found;
-              });
-
-          if (it == local_edge_range.end())
+          if (local_edge_range[i*3] == -1)
           {
-            local_edge_range.push_back(i);
-            local_edge_range.push_back(m);
-            local_edge_range.push_back(m);
+            local_edge_range[i*3]   = i;
+            local_edge_range[i*3+1] = m;
+            local_edge_range[i*3+2] = m;
           }
           else
-            *(it+stride-1) = m;
+            local_edge_range[i*3+2] = m;
         }
         else
         {
@@ -239,14 +229,13 @@ class TriangleCounting
     }
 
     GraphElem* d_edge_mask = nullptr;
-    const GraphElem llnv = local_edge_range.size()/stride;
+    // TODO FIXME erase entries with -1
+    const GraphElem llnv = local_edge_range.size()/3;
 
-    CudaMalloc(d_edge_mask, stride*llnv*sizeof(GraphElem));
-    CudaMemcpyHtoD(d_edge_mask, local_edge_range.data(), stride*llnv*sizeof(GraphElem));
+    CudaMalloc(d_edge_mask, 3*llnv*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_edge_mask, local_edge_range.data(), 3*llnv*sizeof(GraphElem));
 
     local_count_gpu_masked(llnv, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_);
-
-    local_edge_range.clear();
 #else
     for (GraphElem i = 0; i < lnv; i++)
     {
