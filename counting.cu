@@ -452,7 +452,10 @@ __global__
           if (d_edge_list[n] > d_edge_list[j])
             break;
           if (d_edge_list[n] == d_edge_list[j])
+          {
             count++;
+            break;
+          }
         }
       }
     }
@@ -518,7 +521,10 @@ __global__
           if (d_edge_list[n] > d_edge_list[j])
             break;
           if (d_edge_list[n] == d_edge_list[j])
+          {
             sdata[tid]++;
+            break;
+          }
         }
       }
     }
