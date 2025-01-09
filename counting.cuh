@@ -141,6 +141,7 @@ CudaCall(cudaDeviceSynchronize())
  const GraphElem lnv,
  const GraphElem base,
  const GraphElem bound,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
@@ -154,6 +155,7 @@ __global__
  const GraphElem lnv,
  const GraphElem base,
  const GraphElem bound,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
@@ -166,6 +168,7 @@ __global__
  const GraphElem lnv,
  const GraphElem base,
  const GraphElem bound,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
@@ -176,6 +179,7 @@ __global__
 (
  const GraphElem lnv,
  const GraphElem base,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
@@ -189,6 +193,7 @@ __global__
 (
  const GraphElem lnv,
  const GraphElem base,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
@@ -201,6 +206,7 @@ __global__
 (
  const GraphElem lnv,
  const GraphElem base,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,

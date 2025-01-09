@@ -12,6 +12,7 @@ void local_count_gpu
  const GraphElem lnv,
  const GraphElem base,
  const GraphElem bound,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
@@ -22,9 +23,9 @@ void local_count_gpu
 
 #if defined(USE_CUDA_CG)
   const int tilesize = TILESIZE01;
-  local_count_gpu_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(lnv, base, bound, d_indices, d_edge_list, d_local_count);
+  local_count_gpu_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(lnv, base, bound, d_range, d_indices, d_edge_list, d_local_count);
 #else
-  local_count_gpu_kernel<blocksize><<<nblocks, blocksize>>>(lnv, base, bound, d_indices, d_edge_list, d_local_count);
+  local_count_gpu_kernel<blocksize><<<nblocks, blocksize>>>(lnv, base, bound, d_range, d_indices, d_edge_list, d_local_count);
 #endif
 }
 
@@ -36,6 +37,7 @@ void local_count_gpu_kernel
  const GraphElem lnv,
  const GraphElem base,
  const GraphElem bound,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
@@ -72,13 +74,26 @@ void local_count_gpu_kernel
     for(GraphElem m = start; m < end; m += WarpSize)
     {
       const GraphElem edge_m = d_edge_list[m];
+      const GraphElem base_edge_m = edge_m-base;
+      
       if (g_i < edge_m && (edge_m >= base && edge_m <= bound))
       {
-        const GraphElem jstart = d_indices[edge_m-base];
-        const GraphElem jend = d_indices[edge_m-base+1];
+        const GraphElem jstart = d_indices[base_edge_m];
+        const GraphElem jend = d_indices[base_edge_m+1];
+        
         for (GraphElem n = m + 1; n < end; n++)
         {
           const GraphElem edge_n = d_edge_list[n];
+
+          if (edge_n > d_range[base_edge_m*2+1])
+            break;
+
+          if (edge_m > edge_n)
+            continue;
+
+          if (edge_n < d_range[base_edge_m*2])
+            continue;
+
           for(GraphElem j = jstart; j < jend; j++)
           {
             if (d_edge_list[j] > edge_n)
@@ -114,6 +129,7 @@ void local_count_gpu_kernel
  const GraphElem lnv,
  const GraphElem base,
  const GraphElem bound,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
@@ -139,13 +155,26 @@ void local_count_gpu_kernel
     for(GraphElem m = e0 + tid; m < e1; m += blocksize)
     {
       const GraphElem edge_m = d_edge_list[m];
+      const GraphElem base_edge_m = edge_m-base;
+      
       if (g_i < edge_m && (edge_m >= base && edge_m <= bound))
       {
         const GraphElem jstart = d_indices[edge_m-base];
         const GraphElem jend = d_indices[edge_m-base+1];
+        
         for (GraphElem n = m + 1; n < e1; n++)
         {
           const GraphElem edge_n = d_edge_list[n];
+
+          if (edge_n > d_range[base_edge_m*2+1])
+            break;
+
+          if (edge_m > edge_n)
+            continue;
+
+          if (edge_n < d_range[base_edge_m*2])
+            continue;
+
           for(GraphElem j = jstart; j < jend; j++)
           {
             if (d_edge_list[j] > edge_n)
@@ -223,10 +252,16 @@ __global__
   
   for (GraphElem i = start + bid; i < end; i += step)
   {
+    const GraphElem edge_i = d_edge_list[i];
     for(GraphElem k = jstart + tid; k < jend; k += blocksize)
     {
-      if (d_edge_list[k] == d_edge_list[i])
+      if (d_edge_list[k] > edge_i)
+        break;
+      if (d_edge_list[k] == edge_i)
+      {
         sdata[tid]++;
+        break;
+      }
     }
   }
     
@@ -268,8 +303,6 @@ __global__
       d_indices, d_edge_list, d_local_count);
 #endif
 }
-
-//__device__ 
 
 #if defined(USE_CUDA_CG)
 template <int tilesize, int blocksize>
@@ -396,6 +429,7 @@ void local_count_gpu_masked
 (
  const GraphElem lnv,
  const GraphElem base,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
@@ -407,9 +441,9 @@ void local_count_gpu_masked
 
 #if defined(USE_CUDA_CG)
   const int tilesize = TILESIZE01;
-  local_count_gpu_masked_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(lnv, base, d_edge_mask, d_indices, d_edge_list, d_local_count);
+  local_count_gpu_masked_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(lnv, base, d_range, d_edge_mask, d_indices, d_edge_list, d_local_count);
 #else
-  local_count_gpu_masked_kernel<blocksize><<<nblocks, blocksize>>>(lnv, base, d_edge_mask, d_indices, d_edge_list, d_local_count);
+  local_count_gpu_masked_kernel<blocksize><<<nblocks, blocksize>>>(lnv, base, d_range, d_edge_mask, d_indices, d_edge_list, d_local_count);
 #endif
 }
 
@@ -420,6 +454,7 @@ __global__
 (
  const GraphElem lnv,
  const GraphElem base,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
@@ -462,11 +497,23 @@ __global__
     for(GraphElem m = start; m <= end; m += WarpSize)
     {
       const GraphElem edge_m = d_edge_list[m];
-      const GraphElem jstart = d_indices[edge_m-base];
-      const GraphElem jend = d_indices[edge_m-base+1];
+      const GraphElem base_edge_m = edge_m-base;
+      const GraphElem jstart = d_indices[base_edge_m];
+      const GraphElem jend = d_indices[base_edge_m+1];
+
       for (GraphElem n = m + 1; n < last; n++)
       {
         const GraphElem edge_n = d_edge_list[n];
+                
+        if (edge_n > d_range[base_edge_m*2+1])
+          break;
+                               
+        if (edge_m > edge_n)
+          continue;
+
+        if (edge_n < d_range[base_edge_m*2])
+          continue;
+        
         for(GraphElem j = jstart; j < jend; j++)
         {
           if (d_edge_list[j] > edge_n)
@@ -499,6 +546,7 @@ __global__
 (
  const GraphElem lnv,
  const GraphElem base,
+ const GraphElem* __restrict__ d_range,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
@@ -528,15 +576,27 @@ __global__
     const GraphElem e0 = range[0];
     const GraphElem e1 = range[1];
     const GraphElem last = range[2];
-
+    
     for(GraphElem m = e0 + tid; m <= e1; m += blocksize)
     {
       const GraphElem edge_m = d_edge_list[m];
-      const GraphElem jstart = d_indices[edge_m-base];
-      const GraphElem jend = d_indices[edge_m-base+1];
+      const GraphElem base_edge_m = edge_m-base;
+      const GraphElem jstart = d_indices[base_edge_m];
+      const GraphElem jend = d_indices[base_edge_m+1];
+      
       for (GraphElem n = m + 1; n < last; n++)
       {
         const GraphElem edge_n = d_edge_list[n];
+                
+        if (edge_n > d_range[base_edge_m*2+1])
+          break;
+                               
+        if (edge_m > edge_n)
+          continue;
+
+        if (edge_n < d_range[base_edge_m*2])
+          continue;
+
         for(GraphElem j = jstart; j < jend; j++)
         {
           if (d_edge_list[j] > edge_n)

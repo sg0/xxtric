@@ -82,6 +82,7 @@ class TriangleCounting
     erange_ = new GraphElem[nv*2]();
     GraphElem *send_count  = new GraphElem[size_]();
     recv_count_  = new GraphElem[size_]();
+    std::vector<GraphElem> local_erange(lnv*2);
 
     std::vector<GraphElem> etails(lne);
 
@@ -106,27 +107,34 @@ class TriangleCounting
       Edge const& edge_s = g_->get_edge(e0);
       Edge const& edge_t = g_->get_edge(e1-1);
 
+      local_erange[i*2] = edge_s.tail_;
+      local_erange[i*2+1] = edge_t.tail_;
       erange_[(i + base)*2] = edge_s.tail_;
       erange_[(i + base)*2+1] = edge_t.tail_;
     }
     
     MPI_Barrier(comm_);
+
     
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
+    GraphElem* d_range = nullptr;
+
+    CudaMalloc(d_range, 2*lnv*sizeof(GraphElem));
     CudaMalloc(d_eind_, (lnv+1)*sizeof(GraphElem));
     CudaMalloc(d_elst_, lne*sizeof(GraphElem));
     CudaMalloc(d_ntriangles_, sizeof(GraphElem));
 
     CudaMemcpyHtoD(d_eind_, g_->edge_indices_.data(), (lnv+1)*sizeof(GraphElem));
     CudaMemcpyHtoD(d_elst_, etails.data(), lne*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_range, local_erange.data(), 2*lnv*sizeof(GraphElem));
     
     CudaMemset(d_ntriangles_, 0, sizeof(GraphElem));
 
     /// Local counting
 #if defined(SEPARATE_LOCAL_COUNTING_KERNEL)    
-    local_count_gpu(lnv, base, g_->get_bound(rank_), d_eind_, d_elst_, d_ntriangles_);
+    local_count_gpu(lnv, base, g_->get_bound(rank_), d_range, d_eind_, d_elst_, d_ntriangles_);
 
     /// Data requirements for remote counting
 #if defined(USE_OPENMP)
@@ -249,7 +257,7 @@ class TriangleCounting
     CudaMalloc(d_edge_mask, 3*llnv*sizeof(GraphElem));
     CudaMemcpyHtoD(d_edge_mask, edge_range.data(), 3*llnv*sizeof(GraphElem));
 
-    local_count_gpu_masked(llnv, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_);
+    local_count_gpu_masked(llnv, base, d_range, d_edge_mask, d_eind_, d_elst_, d_ntriangles_);
 
     local_edge_range.clear();
     edge_range.clear();
@@ -384,6 +392,7 @@ class TriangleCounting
 #endif
     
     delete []send_count;
+    CudaFree(d_range);
 #if defined(MASKED_LOCAL_COUNTING_KERNEL)
     CudaFree(d_edge_mask);
 #endif
