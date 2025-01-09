@@ -449,12 +449,11 @@ __global__
       {
         for(GraphElem j = jstart; j < jend; j++)
         {
-          if (d_edge_list[n] > d_edge_list[j])
+          if (d_edge_list[j] > d_edge_list[n])
             break;
           if (d_edge_list[n] == d_edge_list[j])
           {
             count++;
-            break;
           }
         }
       }
@@ -518,12 +517,11 @@ __global__
       {
         for(GraphElem j = jstart; j < jend; j++)
         {
-          if (d_edge_list[n] > d_edge_list[j])
+          if (d_edge_list[j] > d_edge_list[n])
             break;
           if (d_edge_list[n] == d_edge_list[j])
           {
             sdata[tid]++;
-            break;
           }
         }
       }
