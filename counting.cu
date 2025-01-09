@@ -78,10 +78,16 @@ void local_count_gpu_kernel
         const GraphElem jend = d_indices[edge_m-base+1];
         for (GraphElem n = m + 1; n < end; n++)
         {
+          const GraphElem edge_n = d_edge_list[n];
           for(GraphElem j = jstart; j < jend; j++)
           {
-            if (d_edge_list[n] == d_edge_list[j])
+            if (d_edge_list[j] > edge_n)
+              break;
+            if (d_edge_list[j] == edge_n)
+            {
               count++;
+              break;
+            }
           }
         }
       }
@@ -139,10 +145,16 @@ void local_count_gpu_kernel
         const GraphElem jend = d_indices[edge_m-base+1];
         for (GraphElem n = m + 1; n < e1; n++)
         {
+          const GraphElem edge_n = d_edge_list[n];
           for(GraphElem j = jstart; j < jend; j++)
           {
-            if (d_edge_list[n] == d_edge_list[j])
+            if (d_edge_list[j] > edge_n)
+              break;
+            if (d_edge_list[j] == edge_n)
+            {
               sdata[tid]++;
+              break;
+            }
           }
         }
       }
@@ -257,6 +269,8 @@ __global__
 #endif
 }
 
+//__device__ 
+
 #if defined(USE_CUDA_CG)
 template <int tilesize, int blocksize>
 __global__
@@ -302,7 +316,9 @@ void local_count_gpu_recv_kernel
     for(GraphElem k = start; k < end; k += WarpSize)
     {
       if (d_edge_list[k] == edge)
+      {
         count++;
+      }
     }
     
     warp.sync();
@@ -352,7 +368,10 @@ void local_count_gpu_recv_kernel
     for(GraphElem k = start + tid; k < end; k += blocksize)
     {
       if (d_edge_list[k] == edge)
+      {
         sdata[tid]++;
+        break;
+      }
     }
   }
 
@@ -447,13 +466,15 @@ __global__
       const GraphElem jend = d_indices[edge_m-base+1];
       for (GraphElem n = m + 1; n < last; n++)
       {
+        const GraphElem edge_n = d_edge_list[n];
         for(GraphElem j = jstart; j < jend; j++)
         {
-          if (d_edge_list[j] > d_edge_list[n])
+          if (d_edge_list[j] > edge_n)
             break;
-          if (d_edge_list[n] == d_edge_list[j])
+          if (d_edge_list[n] == edge_n)
           {
             count++;
+            break;
           }
         }
       }
@@ -515,13 +536,15 @@ __global__
       const GraphElem jend = d_indices[edge_m-base+1];
       for (GraphElem n = m + 1; n < last; n++)
       {
+        const GraphElem edge_n = d_edge_list[n];
         for(GraphElem j = jstart; j < jend; j++)
         {
-          if (d_edge_list[j] > d_edge_list[n])
+          if (d_edge_list[j] > edge_n)
             break;
-          if (d_edge_list[n] == d_edge_list[j])
+          if (d_edge_list[j] == edge_n)
           {
             sdata[tid]++;
+            break;
           }
         }
       }
