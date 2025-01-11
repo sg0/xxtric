@@ -75,6 +75,7 @@ class TriangleCounting
     MPI_Comm_rank(comm_, &rank_);
 
     const GraphElem lnv = g_->get_lnv();
+    const GraphElem lne = g_->get_lne();
     const GraphElem nv = g_->get_nv();
 
     vcount_ = new GraphElem[lnv]();

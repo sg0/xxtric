@@ -1,6 +1,7 @@
 #include "deftypes.hpp"
 #include "counting.cuh"
 #include <cassert>
+#include <iostream>
 
 #if defined(USE_CUDA_CG)
 #include <cooperative_groups.h> 
@@ -21,6 +22,30 @@ void local_count_gpu
   const int blocksize = BLOCKDIM03;
   const GraphElem nblocks = (lnv + blocksize - 1) / blocksize;
 
+#if defined(CALC_WARP_OCCUPANCY)
+    int device, numBlocks;
+    cudaDeviceProp prop;
+    int activeWarps;
+    int maxWarps;
+
+    cudaGetDevice(&device);
+    cudaGetDeviceProperties(&prop, device);
+
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &numBlocks,
+#if defined(USE_CUDA_CG)
+        local_count_gpu_kernel<TILESIZE01, blocksize>,
+#else
+        local_count_gpu_kernel<blocksize>,
+#endif
+        blocksize,
+        0);
+
+    activeWarps = numBlocks * blocksize / prop.warpSize;
+    maxWarps = prop.maxThreadsPerMultiProcessor / prop.warpSize;
+
+    std::cout << "Occupancy (" << device << "): " << (double)activeWarps / maxWarps * 100 << "%" << std::endl;
+#endif  
 #if defined(USE_CUDA_CG)
   const int tilesize = TILESIZE01;
   local_count_gpu_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(lnv, base, bound, d_range, d_indices, d_edge_list, d_local_count);
