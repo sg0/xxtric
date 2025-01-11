@@ -121,6 +121,10 @@ class TriangleCounting
 
     GraphElem* d_range = nullptr;
 
+    int deviceCount;
+    cudaGetDeviceCount(&deviceCount);
+    cudaSetDevice(rank_%deviceCount);
+
     CudaMalloc(d_range, 2*lnv*sizeof(GraphElem));
     CudaMalloc(d_eind_, (lnv+1)*sizeof(GraphElem));
     CudaMalloc(d_elst_, lne*sizeof(GraphElem));
