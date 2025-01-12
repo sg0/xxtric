@@ -27,6 +27,8 @@ void local_count_gpu
     cudaDeviceProp prop;
     int activeWarps;
     int maxWarps;
+    int len = 15;
+    char gpu_id[15];
 
     cudaGetDevice(&device);
     cudaGetDeviceProperties(&prop, device);
@@ -41,10 +43,13 @@ void local_count_gpu
         blocksize,
         0);
 
+    cudaDeviceGetPCIBusId(gpu_id, len, device);
+    std::string str_gpu(gpu_id);
+
     activeWarps = numBlocks * blocksize / prop.warpSize;
     maxWarps = prop.maxThreadsPerMultiProcessor / prop.warpSize;
 
-    std::cout << "Separate Kernel Occupancy (" << device << "): " << (double)activeWarps / maxWarps * 100 << "%" << std::endl;
+    std::cout << "Separate Kernel Occupancy (" << str_gpu << "): " << (double)activeWarps / maxWarps * 100 << "%" << std::endl;
 #endif  
 #if defined(USE_CUDA_CG)
   const int tilesize = TILESIZE01;
@@ -469,6 +474,9 @@ void local_count_gpu_masked
     cudaDeviceProp prop;
     int activeWarps;
     int maxWarps;
+    int len = 15;
+    char gpu_id[15];
+
 
     cudaGetDevice(&device);
     cudaGetDeviceProperties(&prop, device);
@@ -483,10 +491,13 @@ void local_count_gpu_masked
         blocksize,
         0);
 
+    cudaDeviceGetPCIBusId(gpu_id, len, device);
+    std::string str_gpu(gpu_id);
+    
     activeWarps = numBlocks * blocksize / prop.warpSize;
     maxWarps = prop.maxThreadsPerMultiProcessor / prop.warpSize;
 
-    std::cout << "Masked Kernel Occupancy (" << device << "): " << (double)activeWarps / maxWarps * 100 << "%" << std::endl;
+    std::cout << "Masked Kernel Occupancy (" << str_gpu << "): " << (double)activeWarps / maxWarps * 100 << "%" << std::endl;
 #endif  
 #if defined(USE_CUDA_CG)
   const int tilesize = TILESIZE01;
