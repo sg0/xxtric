@@ -578,7 +578,7 @@ __global__
         {
           if (d_edge_list[j] > edge_n)
             break;
-          if (d_edge_list[n] == edge_n)
+          if (d_edge_list[j] == edge_n)
           {
             count++;
             break;
