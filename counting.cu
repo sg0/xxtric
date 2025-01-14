@@ -1118,9 +1118,10 @@ __global__
                 
         for(GraphElem j = jstart; j < jend; j++)
         {
-          if (d_edge_list[j] > edge_n)
+          const GraphElem edge_j = d_edge_list[j];
+          if (edge_j > edge_n)
             break;
-          if (d_edge_list[j] == edge_n)
+          if (edge_j == edge_n)
           {
             count++;
             break;
@@ -1191,9 +1192,10 @@ __global__
                 
         for(GraphElem j = jstart; j < jend; j++)
         {
-          if (d_edge_list[j] > edge_n)
+          const GraphElem edge_j = d_edge_list[j];
+          if (edge_j > edge_n)
             break;
-          if (d_edge_list[j] == edge_n)
+          if (edge_j == edge_n)
           {
             sdata[tid]++;
             break;
