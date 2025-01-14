@@ -132,7 +132,12 @@ class Graph
          
         // update vertex partition information
         void repart(std::vector<GraphElem> const& parts)
-        { memcpy(parts_.data(), parts.data(), sizeof(GraphElem)*(size_+1)); }
+        { std::memcpy(parts_.data(), parts.data(), sizeof(GraphElem)*(size_+1)); }
+
+        void get_parts(std::vector<GraphElem>& cparts) const
+        { std::copy(parts_.begin(), parts_.end(), std::back_inserter(cparts)); }  
+
+        GraphElem* get_parts() const { return const_cast<GraphElem*>(parts_.data()); } 
 
         // TODO FIXME put asserts like the following
         // everywhere function member of Graph class

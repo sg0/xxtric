@@ -136,6 +136,64 @@ CudaCall(cudaDeviceSynchronize())
 #define MAX_CUDA_STREAMS (8)
 #endif
 
+#if defined(COMBINED_LOCAL_COUNTING_KERNEL)
+void combined_local_count_gpu
+(
+ const GraphElem rank,
+ const GraphElem size,
+ const GraphElem lnv,
+ const GraphElem* __restrict__ d_parts,
+ const GraphElem* __restrict__ d_range,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_vcount,
+ GraphElem* __restrict__ d_send_count,
+ GraphElem* __restrict__ d_local_count
+);
+
+__device__ 
+GraphElem get_owner
+(
+ const GraphElem size, 
+ const GraphElem value, 
+ const GraphElem* d_parts
+);
+
+#if defined(USE_CUDA_CG)
+template <int tilesize, int blocksize>
+__global__  
+void combined_local_count_gpu_kernel
+(
+ const GraphElem rank,
+ const GraphElem size,
+ const GraphElem lnv,
+ const GraphElem* __restrict__ d_parts,
+ const GraphElem* __restrict__ d_range,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_vcount,
+ GraphElem* __restrict__ d_send_count,
+ GraphElem* __restrict__ d_local_count
+);
+#else
+template <int blocksize>
+__global__  
+void combined_local_count_gpu_kernel
+(
+ const GraphElem rank,
+ const GraphElem size,
+ const GraphElem lnv,
+ const GraphElem* __restrict__ d_parts,
+ const GraphElem* __restrict__ d_range,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_vcount,
+ GraphElem* __restrict__ d_send_count,
+ GraphElem* __restrict__ d_local_count
+);
+#endif
+#endif // COMBINED_LOCAL_COUNTING_KERNEL
+
  void local_count_gpu
 (
  const GraphElem lnv,

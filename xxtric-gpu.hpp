@@ -82,8 +82,6 @@ class TriangleCounting
     erange_ = new GraphElem[nv*2]();
     GraphElem *send_count  = new GraphElem[size_]();
     recv_count_  = new GraphElem[size_]();
-    std::vector<GraphElem> local_erange(lnv*2);
-
     std::vector<GraphElem> etails(lne);
 
     double t0 = MPI_Wtime();
@@ -107,24 +105,21 @@ class TriangleCounting
       Edge const& edge_s = g_->get_edge(e0);
       Edge const& edge_t = g_->get_edge(e1-1);
 
-      local_erange[i*2] = edge_s.tail_;
-      local_erange[i*2+1] = edge_t.tail_;
       erange_[(i + base)*2] = edge_s.tail_;
       erange_[(i + base)*2+1] = edge_t.tail_;
     }
     
     MPI_Barrier(comm_);
 
-    
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
-    GraphElem* d_range = nullptr;
-
+    /// assume all tasks/node can see all GPUs in a node
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
     cudaSetDevice(rank_%deviceCount);
 
+    GraphElem* d_range = nullptr;
     CudaMalloc(d_range, 2*lnv*sizeof(GraphElem));
     CudaMalloc(d_eind_, (lnv+1)*sizeof(GraphElem));
     CudaMalloc(d_elst_, lne*sizeof(GraphElem));
@@ -132,12 +127,28 @@ class TriangleCounting
 
     CudaMemcpyHtoD(d_eind_, g_->edge_indices_.data(), (lnv+1)*sizeof(GraphElem));
     CudaMemcpyHtoD(d_elst_, etails.data(), lne*sizeof(GraphElem));
-    CudaMemcpyHtoD(d_range, local_erange.data(), 2*lnv*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_range, &erange_[2*base], 2*lnv*sizeof(GraphElem));
     
     CudaMemset(d_ntriangles_, 0, sizeof(GraphElem));
 
     /// Local counting
-#if defined(SEPARATE_LOCAL_COUNTING_KERNEL)    
+
+#if defined(COMBINED_LOCAL_COUNTING_KERNEL)
+    GraphElem* d_vcount = nullptr;
+    GraphElem* d_send_count = nullptr;
+    GraphElem* d_parts = nullptr;
+
+    CudaMalloc(d_vcount, lnv*sizeof(GraphElem));
+    CudaMalloc(d_send_count, size_*sizeof(GraphElem));
+    CudaMalloc(d_parts, (size_+1)*sizeof(GraphElem));
+    
+    CudaMemcpyHtoD(d_parts, g_->get_parts(), (size_+1)*sizeof(GraphElem));
+    
+    CudaMemset(d_vcount, 0, lnv*sizeof(GraphElem));
+    CudaMemset(d_send_count, 0, size_*sizeof(GraphElem));
+
+    combined_local_count_gpu(rank_, size_, lnv, d_parts, d_vcount, d_send_count, d_range, d_eind_, d_elst_, d_ntriangles_);
+#elif defined(SEPARATE_LOCAL_COUNTING_KERNEL)    
     local_count_gpu(lnv, base, g_->get_bound(rank_), d_range, d_eind_, d_elst_, d_ntriangles_);
 
     /// Data requirements for remote counting
@@ -314,6 +325,14 @@ class TriangleCounting
 #endif
         
     CudaDeviceSynchronize();
+#if defined(COMBINED_LOCAL_COUNTING_KERNEL)
+    CudaMemcpyDtoH(vcount_, d_vcount, lnv*sizeof(GraphElem));
+    CudaMemcpyDtoH(send_count, d_send_count, size_*sizeof(GraphElem));
+
+    CudaFree(d_vcount);
+    CudaFree(d_send_count);
+#endif
+
     double t1 = MPI_Wtime();
         
     double p_tot = t1 - t0, t_tot = 0.0, t_max = 0.0, t_min = 0.0;
