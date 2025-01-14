@@ -156,7 +156,7 @@ GraphElem get_owner
 (
  const GraphElem size, 
  const GraphElem value, 
- const GraphElem* d_parts
+ const GraphElem* __restrict__ d_parts
 );
 
 #if defined(USE_CUDA_CG)
@@ -265,6 +265,43 @@ __global__
  const GraphElem lnv,
  const GraphElem base,
  const GraphElem* __restrict__ d_range,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#endif
+
+/// masked kernels with less global memory reads
+ void local_count_gpu_masked2
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+
+#if defined(USE_CUDA_CG)
+template <int tilesize, int blocksize>
+__global__  
+ void local_count_gpu_masked2_kernel
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#else
+template <int blocksize>
+__global__  
+ void local_count_gpu_masked2_kernel
+(
+ const GraphElem lnv,
+ const GraphElem base,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,

@@ -87,7 +87,7 @@ class TriangleCounting
     double t0 = MPI_Wtime();
 
     // store edge ranges
-    GraphElem base = g_->get_base(rank_);
+    const GraphElem base = g_->get_base(rank_);
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1;
@@ -119,21 +119,28 @@ class TriangleCounting
     cudaGetDeviceCount(&deviceCount);
     cudaSetDevice(rank_%deviceCount);
 
+#if defined(LESS_GLOBALMEM_READS)
+#else
     GraphElem* d_range = nullptr;
     CudaMalloc(d_range, 2*lnv*sizeof(GraphElem));
+#endif
     CudaMalloc(d_eind_, (lnv+1)*sizeof(GraphElem));
     CudaMalloc(d_elst_, lne*sizeof(GraphElem));
     CudaMalloc(d_ntriangles_, sizeof(GraphElem));
 
     CudaMemcpyHtoD(d_eind_, g_->edge_indices_.data(), (lnv+1)*sizeof(GraphElem));
     CudaMemcpyHtoD(d_elst_, etails.data(), lne*sizeof(GraphElem));
+#if defined(LESS_GLOBALMEM_READS)
+#else
     CudaMemcpyHtoD(d_range, &erange_[2*base], 2*lnv*sizeof(GraphElem));
+#endif
     
     CudaMemset(d_ntriangles_, 0, sizeof(GraphElem));
 
     /// Local counting
 
 #if defined(COMBINED_LOCAL_COUNTING_KERNEL)
+    #pragma message "COMBINED_LOCAL_COUNTING_KERNEL has bugs; do not use!"
     GraphElem* d_vcount = nullptr;
     GraphElem* d_send_count = nullptr;
     GraphElem* d_parts = nullptr;
@@ -147,7 +154,7 @@ class TriangleCounting
     CudaMemset(d_vcount, 0, lnv*sizeof(GraphElem));
     CudaMemset(d_send_count, 0, size_*sizeof(GraphElem));
 
-    combined_local_count_gpu(rank_, size_, lnv, d_parts, d_vcount, d_send_count, d_range, d_eind_, d_elst_, d_ntriangles_);
+    combined_local_count_gpu(rank_, size_, lnv, d_parts, d_range, d_eind_, d_elst_, d_vcount, d_send_count, d_ntriangles_);
 #elif defined(SEPARATE_LOCAL_COUNTING_KERNEL)    
     local_count_gpu(lnv, base, g_->get_bound(rank_), d_range, d_eind_, d_elst_, d_ntriangles_);
 
@@ -256,6 +263,7 @@ class TriangleCounting
     edge_range.reserve(lnv*3);
 
     // erase entries with -1
+    // TODO FIXME reduce redundancies
     for (GraphElem n = 0; n < 3*lnv; n+=3)
     {
       if (local_edge_range[n] == -1)
@@ -272,7 +280,11 @@ class TriangleCounting
     CudaMalloc(d_edge_mask, 3*llnv*sizeof(GraphElem));
     CudaMemcpyHtoD(d_edge_mask, edge_range.data(), 3*llnv*sizeof(GraphElem));
 
+#if defined(LESS_GLOBALMEM_READS)
+    local_count_gpu_masked2(llnv, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_);
+#else
     local_count_gpu_masked(llnv, base, d_range, d_edge_mask, d_eind_, d_elst_, d_ntriangles_);
+#endif
 
     local_edge_range.clear();
     edge_range.clear();
@@ -415,7 +427,10 @@ class TriangleCounting
 #endif
     
     delete []send_count;
+#if defined(LESS_GLOBALMEM_READS)
+#else
     CudaFree(d_range);
+#endif
 #if defined(MASKED_LOCAL_COUNTING_KERNEL)
     CudaFree(d_edge_mask);
 #endif
