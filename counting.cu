@@ -681,6 +681,7 @@ void local_count_gpu_recv_kernel
 
   GraphElem* t_range = &range[(block_tid/WarpSize)*2];
   GraphElem c0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+  GraphElem tid_count = 0;
 
   for (GraphElem i = c0; i < count/2; i += step*(BlockSize/WarpSize))
   {
@@ -694,7 +695,6 @@ void local_count_gpu_recv_kernel
     const GraphElem start = t_range[0];
     const GraphElem end = t_range[1];
     const GraphElem edge = d_rbuf[ind+1];
-    GraphElem count = 0;
 
     for(GraphElem k = start + warp_tid; k < end; k += WarpSize)
     {
@@ -702,22 +702,18 @@ void local_count_gpu_recv_kernel
         break;
       if (d_edge_list[k] == edge)
       {
-        count = 1;
+        tid_count++;
         break;
       }
     }
-    
-    warp.sync();
+  }
 
 #pragma unroll
-    for(int j = warp.size()/2; j > 0; j /= 2)
-      count += __shfl_down_sync(0xFFFFFFFF, count, j);
-    
-    warp.sync();
+  for(int j = warp.size()/2; j > 0; j /= 2)
+    tid_count += __shfl_down_sync(0xFFFFFFFF, tid_count, j);
 
-    if (warp_tid == 0)
-      atomicAdd((unsigned long long int*)d_local_count, count);
-  }
+  if (warp_tid == 0)
+    atomicAdd((unsigned long long int*)d_local_count, tid_count);
 }
 #else
 template <int blocksize>
@@ -1091,6 +1087,7 @@ __global__
 
   GraphElem* t_range = &range[(block_tid/WarpSize)*3];
   GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+  GraphElem count = 0;
 
   for (GraphElem i = i0; i < lnv; i += step*(BlockSize/WarpSize))
   {
@@ -1108,7 +1105,6 @@ __global__
     const GraphElem start = t_range[0];
     const GraphElem end = t_range[1];
     const GraphElem last = t_range[2];
-    GraphElem count = 0;
 
     for(GraphElem j = start + 1 + warp_tid; j < last; j += WarpSize)
     {
@@ -1139,18 +1135,14 @@ __global__
         }
       }
     }
-    
-    warp.sync();
+  }
 
 #pragma unroll
-    for(int j = warp.size()/2; j > 0; j /= 2)
-      count += __shfl_down_sync(0xFFFFFFFF, count, j);
-    
-    //warp.sync();
+  for(int j = warp.size()/2; j > 0; j /= 2)
+    count += __shfl_down_sync(0xFFFFFFFF, count, j);
 
-    if (warp_tid == 0)
-      atomicAdd((unsigned long long int*)d_local_count, count);
-  }
+  if (warp_tid == 0)
+    atomicAdd((unsigned long long int*)d_local_count, count);
 }
 #else
 template <int blocksize>
