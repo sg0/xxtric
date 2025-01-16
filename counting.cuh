@@ -152,7 +152,7 @@ void combined_local_count_gpu
 );
 
 __device__ 
-GraphElem get_owner
+GraphElem lower_bound
 (
  const GraphElem size, 
  const GraphElem value, 

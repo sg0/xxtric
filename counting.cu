@@ -64,7 +64,7 @@ void combined_local_count_gpu
 }
 
 /// every thread launches
-__device__ GraphElem get_owner
+__device__ GraphElem lower_bound
 (
  const GraphElem size, 
  const GraphElem value, 
@@ -137,7 +137,7 @@ void combined_local_count_gpu_kernel
     {
       const GraphElem edge_m = d_edge_list[m];
       const GraphElem base_edge_m = edge_m-base;
-      const GraphElem owner = get_owner(size+1, edge_m, d_parts);
+      const GraphElem owner = lower_bound(size+1, edge_m, d_parts);
 
       if (g_i > edge_m)
       {
@@ -251,7 +251,7 @@ void combined_local_count_gpu_kernel
     {
       const GraphElem edge_m = d_edge_list[m];
       const GraphElem base_edge_m = edge_m-base;
-      const GraphElem owner = get_owner(size+1, edge_m, d_parts);
+      const GraphElem owner = lower_bound(size+1, edge_m, d_parts); // get_owner
 
       if (g_i < edge_m)
       {
