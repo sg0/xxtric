@@ -206,7 +206,9 @@ class TriangleCounting
     }
 #elif defined(MASKED_LOCAL_COUNTING_KERNEL)
     std::vector<GraphElem> local_edge_range(lnv*3,-1);
-
+#if defined(USE_OPENMP)
+#pragma omp parallel for schedule(dynamic) default(shared)
+#endif
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];
@@ -249,7 +251,9 @@ class TriangleCounting
                 break;
               if (!edge_above_min(edge_m.tail_, edge_n.tail_))
                 continue;
-
+#if defined(USE_OPENMP)
+#pragma omp atomic update
+#endif
               send_count[owner] += 2;
               vcount_[i] += 1;
             }
