@@ -691,16 +691,19 @@ void local_count_gpu_recv_kernel
 
     warp.sync();
 
-    const GraphElem start = t_range[0] + warp_tid;
+    const GraphElem start = t_range[0];
     const GraphElem end = t_range[1];
     const GraphElem edge = d_rbuf[ind+1];
     GraphElem count = 0;
 
-    for(GraphElem k = start; k < end; k += WarpSize)
+    for(GraphElem k = start + warp_tid; k < end; k += WarpSize)
     {
+      if (d_edge_list[k] > edge)
+        break;
       if (d_edge_list[k] == edge)
       {
         count++;
+        break;
       }
     }
     
@@ -750,6 +753,8 @@ void local_count_gpu_recv_kernel
 
     for(GraphElem k = start + tid; k < end; k += blocksize)
     {
+      if (d_edge_list[k] > edge)
+        break;
       if (d_edge_list[k] == edge)
       {
         sdata[tid]++;
@@ -1089,11 +1094,10 @@ __global__
 
   for (GraphElem i = i0; i < lnv; i += step*(BlockSize/WarpSize))
   {
-    const GraphElem id = 3*i;
-    const GraphElem g_i = i + base;
-    
     if(warp_tid == 0)
     {
+      const GraphElem id = 3*i;
+
       t_range[0] = d_edge_mask[id+1];
       t_range[1] = d_edge_mask[id+2];
       t_range[2] = d_indices[d_edge_mask[id]+1];
@@ -1106,7 +1110,7 @@ __global__
     const GraphElem last = t_range[2];
     GraphElem count = 0;
 
-    for(GraphElem j = start + warp_tid + 1; j < last; j += WarpSize)
+    for(GraphElem j = start + 1 + warp_tid; j < last; j += WarpSize)
     {
       const GraphElem edge_j = d_edge_list[j];
 
@@ -1148,92 +1152,6 @@ __global__
       atomicAdd((unsigned long long int*)d_local_count, count);
   }
 }
-
-
-#if 0
-template <int tilesize, int blocksize>
-__global__  
- void local_count_gpu_masked2_kernel
-(
- const GraphElem lnv,
- const GraphElem base,
- const GraphElem* __restrict__ d_edge_mask,
- const GraphElem* __restrict__ d_indices,
- const GraphElem* __restrict__ d_edge_list,
- GraphElem* __restrict__ d_local_count
-)
-{
-  static_assert(blocksize % tilesize == 0, "Block size must be a multiple of tile size");
-  
-  const GraphElem bid = blockIdx.x, step = gridDim.x;
-  const int WarpSize = tilesize, BlockSize = blocksize;
-  __shared__ GraphElem range[(BlockSize/WarpSize)*3];
-
-  cg::thread_block block = cg::this_thread_block();
-  cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
-
-  const GraphElem block_tid = block.thread_rank();
-  const GraphElem warp_tid = warp.thread_rank();
-
-  GraphElem* t_range = &range[(block_tid/WarpSize)*3];
-  GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
-
-  for (GraphElem i = i0; i < lnv; i += step*(BlockSize/WarpSize))
-  {
-    const GraphElem id = 3*i;
-    
-    if(warp_tid == 0)
-    {
-      t_range[0] = d_edge_mask[id+1];
-      t_range[1] = d_edge_mask[id+2];
-      t_range[2] = d_indices[d_edge_mask[id]+1];
-    }
-
-    warp.sync();
-
-    const GraphElem start = t_range[0] + warp_tid;
-    const GraphElem end = t_range[1];
-    const GraphElem last = t_range[2];
-    GraphElem count = 0;
-
-    for(GraphElem m = start; m <= end; m += WarpSize)
-    {
-      const GraphElem edge_m = d_edge_list[m];
-      const GraphElem base_edge_m = edge_m-base;
-      const GraphElem jstart = d_indices[base_edge_m];
-      const GraphElem jend = d_indices[base_edge_m+1];
-
-      for (GraphElem n = m + 1; n < last; n++)
-      {
-        const GraphElem edge_n = d_edge_list[n];
-                
-        for(GraphElem j = jstart; j < jend; j++)
-        {
-          const GraphElem edge_j = d_edge_list[j];
-          if (edge_j > edge_n)
-            break;
-          if (edge_j == edge_n)
-          {
-            count++;
-            break;
-          }
-        }
-      }
-    }
-    
-    warp.sync();
-
-#pragma unroll
-    for(int j = warp.size()/2; j > 0; j /= 2)
-      count += __shfl_down_sync(0xFFFFFFFF, count, j);
-    
-    warp.sync();
-
-    if (warp_tid == 0)
-      atomicAdd((unsigned long long int*)d_local_count, count);
-  }
-}
-#endif
 #else
 template <int blocksize>
 __global__  
@@ -1256,10 +1174,9 @@ __global__
 
   for (GraphElem i = bid; i < lnv; i += step)
   {
-    const GraphElem id = 3*i;
-
     if(tid == 0)
     {
+      const GraphElem id = 3*i;
       range[0] = d_edge_mask[id+1];
       range[1] = d_edge_mask[id+2];
       range[2] = d_indices[d_edge_mask[id]+1];
@@ -1270,33 +1187,38 @@ __global__
     const GraphElem e0 = range[0];
     const GraphElem e1 = range[1];
     const GraphElem last = range[2];
-    
-    for(GraphElem m = e0 + tid; m <= e1; m += blocksize)
+   
+    for(GraphElem j = e0 + 1 + tid; j < last; j += blocksize)
     {
-      const GraphElem edge_m = d_edge_list[m];
-      const GraphElem base_edge_m = edge_m-base;
-      const GraphElem jstart = d_indices[base_edge_m];
-      const GraphElem jend = d_indices[base_edge_m+1];
-      
-      for (GraphElem n = m + 1; n < last; n++)
+      const GraphElem edge_j = d_edge_list[j];
+
+      for(GraphElem m = e0; m <= e1; m++)
       {
-        const GraphElem edge_n = d_edge_list[n];
-                
-        for(GraphElem j = jstart; j < jend; j++)
+        const GraphElem edge_m = d_edge_list[m];
+        
+        if ((m != j) && (edge_j > edge_m))
         {
-          const GraphElem edge_j = d_edge_list[j];
-          if (edge_j > edge_n)
-            break;
-          if (edge_j == edge_n)
+          const GraphElem base_edge_m = edge_m-base;
+          const GraphElem nstart = d_indices[base_edge_m];
+          const GraphElem nend = d_indices[base_edge_m+1];
+
+          for(GraphElem n = nstart; n < nend; n++)
           {
-            sdata[tid]++;
-            break;
+            const GraphElem edge_n = d_edge_list[n];
+
+            if (edge_n > edge_j)
+              break;
+            if (edge_n == edge_j)
+            {
+              sdata[tid]++;
+              break;
+            }
           }
         }
       }
     }
   }
-
+    
   __syncthreads();
 
   for (GraphElem s=blocksize/2; s>32; s>>=1) 
