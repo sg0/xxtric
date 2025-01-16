@@ -1090,6 +1090,97 @@ __global__
   for (GraphElem i = i0; i < lnv; i += step*(BlockSize/WarpSize))
   {
     const GraphElem id = 3*i;
+    const GraphElem g_i = i + base;
+    
+    if(warp_tid == 0)
+    {
+      t_range[0] = d_edge_mask[id+1];
+      t_range[1] = d_edge_mask[id+2];
+      t_range[2] = d_indices[d_edge_mask[id]+1];
+    }
+
+    warp.sync();
+
+    const GraphElem start = t_range[0];
+    const GraphElem end = t_range[1];
+    const GraphElem last = t_range[2];
+    GraphElem count = 0;
+
+    for(GraphElem j = start + warp_tid + 1; j < last; j += WarpSize)
+    {
+      const GraphElem edge_j = d_edge_list[j];
+
+      for(GraphElem m = start; m <= end; m++)
+      {
+        const GraphElem edge_m = d_edge_list[m];
+        
+        if ((m != j) && (edge_j > edge_m))
+        {
+          const GraphElem base_edge_m = edge_m-base;
+          const GraphElem nstart = d_indices[base_edge_m];
+          const GraphElem nend = d_indices[base_edge_m+1];
+
+          for(GraphElem n = nstart; n < nend; n++)
+          {
+            const GraphElem edge_n = d_edge_list[n];
+
+            if (edge_n > edge_j)
+              break;
+            if (edge_n == edge_j)
+            {
+              count++;
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    warp.sync();
+
+#pragma unroll
+    for(int j = warp.size()/2; j > 0; j /= 2)
+      count += __shfl_down_sync(0xFFFFFFFF, count, j);
+    
+    warp.sync();
+
+    if (warp_tid == 0)
+      atomicAdd((unsigned long long int*)d_local_count, count);
+  }
+}
+
+
+#if 0
+template <int tilesize, int blocksize>
+__global__  
+ void local_count_gpu_masked2_kernel
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+)
+{
+  static_assert(blocksize % tilesize == 0, "Block size must be a multiple of tile size");
+  
+  const GraphElem bid = blockIdx.x, step = gridDim.x;
+  const int WarpSize = tilesize, BlockSize = blocksize;
+  __shared__ GraphElem range[(BlockSize/WarpSize)*3];
+
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
+
+  const GraphElem block_tid = block.thread_rank();
+  const GraphElem warp_tid = warp.thread_rank();
+
+  GraphElem* t_range = &range[(block_tid/WarpSize)*3];
+  GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+
+  for (GraphElem i = i0; i < lnv; i += step*(BlockSize/WarpSize))
+  {
+    const GraphElem id = 3*i;
     
     if(warp_tid == 0)
     {
@@ -1142,6 +1233,7 @@ __global__
       atomicAdd((unsigned long long int*)d_local_count, count);
   }
 }
+#endif
 #else
 template <int blocksize>
 __global__  
