@@ -702,7 +702,7 @@ void local_count_gpu_recv_kernel
         break;
       if (d_edge_list[k] == edge)
       {
-        count++;
+        count = 1;
         break;
       }
     }
@@ -1146,7 +1146,7 @@ __global__
     for(int j = warp.size()/2; j > 0; j /= 2)
       count += __shfl_down_sync(0xFFFFFFFF, count, j);
     
-    warp.sync();
+    //warp.sync();
 
     if (warp_tid == 0)
       atomicAdd((unsigned long long int*)d_local_count, count);
