@@ -136,6 +136,8 @@ CudaCall(cudaDeviceSynchronize())
 #define MAX_CUDA_STREAMS (8)
 #endif
 
+#define FULL_MASK      (0xFFFFFFFF) 
+
 #if defined(COMBINED_LOCAL_COUNTING_KERNEL)
 void combined_local_count_gpu
 (

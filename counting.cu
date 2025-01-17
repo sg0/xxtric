@@ -200,7 +200,7 @@ void combined_local_count_gpu_kernel
 
 #pragma unroll
     for(int j = warp.size()/2; j > 0; j /= 2)
-      count += __shfl_down_sync(0xFFFFFFFF, count, j);
+      count += __shfl_down_sync(FULL_MASK, count, j);
     
     warp.sync();
 
@@ -463,7 +463,7 @@ void local_count_gpu_kernel
 
 #pragma unroll
     for(int j = warp.size()/2; j > 0; j /= 2)
-      count += __shfl_down_sync(0xFFFFFFFF, count, j);
+      count += __shfl_down_sync(FULL_MASK, count, j);
     
     warp.sync();
 
@@ -698,6 +698,15 @@ void local_count_gpu_recv_kernel
 
     for(GraphElem k = start + warp_tid; k < end; k += WarpSize)
     {
+      if (d_edge_list[k] == edge)
+        tid_count++;
+      
+      if (__any_sync(__activemask(), d_edge_list[k] >= edge))
+        break;
+    }
+    /*
+    for(GraphElem k = start + warp_tid; k < end; k += WarpSize)
+    {
       if (d_edge_list[k] > edge)
         break;
       if (d_edge_list[k] == edge)
@@ -706,11 +715,12 @@ void local_count_gpu_recv_kernel
         break;
       }
     }
+    */
   }
 
 #pragma unroll
   for(int j = warp.size()/2; j > 0; j /= 2)
-    tid_count += __shfl_down_sync(0xFFFFFFFF, tid_count, j);
+    tid_count += __shfl_down_sync(FULL_MASK, tid_count, j);
 
   if (warp_tid == 0)
     atomicAdd((unsigned long long int*)d_local_count, tid_count);
@@ -912,7 +922,7 @@ __global__
 
 #pragma unroll
     for(int j = warp.size()/2; j > 0; j /= 2)
-      count += __shfl_down_sync(0xFFFFFFFF, count, j);
+      count += __shfl_down_sync(FULL_MASK, count, j);
     
     warp.sync();
 
@@ -1139,7 +1149,7 @@ __global__
 
 #pragma unroll
   for(int j = warp.size()/2; j > 0; j /= 2)
-    count += __shfl_down_sync(0xFFFFFFFF, count, j);
+    count += __shfl_down_sync(FULL_MASK, count, j);
 
   if (warp_tid == 0)
     atomicAdd((unsigned long long int*)d_local_count, count);
