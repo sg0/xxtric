@@ -110,7 +110,7 @@ class TriangleCounting
 #if defined(USE_OPENMP)
     GraphElem *tcount = new GraphElem[lnv];
     std::memset(tcount, 0, sizeof(GraphElem)*lnv);
-#pragma omp parallel for schedule(dynamic) default(shared)
+#pragma omp parallel for schedule(static) default(shared)
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];
@@ -534,13 +534,13 @@ class TriangleCounting
       
       if (tup[1] > first_edge.tail_ && tup[1] < last_edge.tail_)
       {
-        Edge const& mid_edge = g_->get_edge(std::midpoint(e0, e1));
+        Edge const& mid_edge = g_->get_edge(MID(e0, e1));
 
         if (tup[1] == mid_edge.tail_)
           return true;
         else if (tup[1] > mid_edge.tail_)
         {
-          for (GraphElem e = std::midpoint(e0, e1) + 1; e < e1; e++)
+          for (GraphElem e = MID(e0, e1) + 1; e < e1; e++)
           {
             Edge const& edge = g_->get_edge(e);
             if (edge.tail_ > tup[1])
@@ -551,7 +551,7 @@ class TriangleCounting
         }
         else
         {
-          for (GraphElem e = e0; e < std::midpoint(e0, e1); e++)
+          for (GraphElem e = e0; e < MID(e0, e1); e++)
           {
             Edge const& edge = g_->get_edge(e);
             if (edge.tail_ > tup[1])

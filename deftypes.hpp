@@ -67,6 +67,7 @@
 
 #define MAX(x,y)                    ((x > y) ? (x) : (y))
 #define MIN(x,y)                    ((x < y) ? (x) : (y))
+#define MID(x,y)                    (x + (y - x) / 2)
 
 #define ONE                         (1)
 #define TWO                         (2)
