@@ -196,6 +196,17 @@ void combined_local_count_gpu_kernel
 #endif
 #endif // COMBINED_LOCAL_COUNTING_KERNEL
 
+#if defined(LESS_GLOBALMEM_READS)
+ void local_count_gpu
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem bound,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#else
  void local_count_gpu
 (
  const GraphElem lnv,
@@ -206,8 +217,22 @@ void combined_local_count_gpu_kernel
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
 );
+#endif
 
 #if defined(USE_CUDA_CG)
+#if defined(LESS_GLOBALMEM_READS)
+template <int tilesize, int blocksize>
+__global__  
+ void local_count_gpu_kernel
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem bound,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#else
 template <int tilesize, int blocksize>
 __global__  
  void local_count_gpu_kernel
@@ -216,6 +241,20 @@ __global__
  const GraphElem base,
  const GraphElem bound,
  const GraphElem* __restrict__ d_range,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#endif
+#else
+#if defined(LESS_GLOBALMEM_READS)
+template <int blocksize>
+__global__  
+ void local_count_gpu_kernel
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem bound,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
@@ -233,6 +272,7 @@ __global__
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
 );
+#endif
 #endif
 
  void local_count_gpu_masked

@@ -156,8 +156,11 @@ class TriangleCounting
 
     combined_local_count_gpu(rank_, size_, lnv, d_parts, d_range, d_eind_, d_elst_, d_vcount, d_send_count, d_ntriangles_);
 #elif defined(SEPARATE_LOCAL_COUNTING_KERNEL)    
+#if defined(LESS_GLOBALMEM_READS)
+    local_count_gpu(lnv, base, g_->get_bound(rank_), d_eind_, d_elst_, d_ntriangles_);
+#else
     local_count_gpu(lnv, base, g_->get_bound(rank_), d_range, d_eind_, d_elst_, d_ntriangles_);
-
+#endif
     /// Data requirements for remote counting
 #if defined(USE_OPENMP)
 #pragma omp parallel for schedule(dynamic) default(shared)

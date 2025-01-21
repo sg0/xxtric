@@ -329,7 +329,18 @@ void combined_local_count_gpu_kernel
 #endif
 #endif // combined_local_counting_kernel
 
-void local_count_gpu
+#if defined(LESS_GLOBALMEM_READS)
+ void local_count_gpu
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem bound,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+)
+#else
+ void local_count_gpu
 (
  const GraphElem lnv,
  const GraphElem base,
@@ -339,6 +350,7 @@ void local_count_gpu
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
 )
+#endif
 {
   const int blocksize = BLOCKDIM03;
   const GraphElem nblocks = (lnv + blocksize - 1) / blocksize;
@@ -372,15 +384,37 @@ void local_count_gpu
 
     std::cout << "Separate Kernel Occupancy (" << str_gpu << "): " << (double)activeWarps / maxWarps * 100 << "%" << std::endl;
 #endif  
+#if defined(LESS_GLOBALMEM_READS)
+#if defined(USE_CUDA_CG)
+  const int tilesize = TILESIZE01;
+  local_count_gpu_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(lnv, base, bound, d_indices, d_edge_list, d_local_count);
+#else
+  local_count_gpu_kernel<blocksize><<<nblocks, blocksize>>>(lnv, base, bound, d_indices, d_edge_list, d_local_count);
+#endif
+#else
 #if defined(USE_CUDA_CG)
   const int tilesize = TILESIZE01;
   local_count_gpu_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(lnv, base, bound, d_range, d_indices, d_edge_list, d_local_count);
 #else
   local_count_gpu_kernel<blocksize><<<nblocks, blocksize>>>(lnv, base, bound, d_range, d_indices, d_edge_list, d_local_count);
 #endif
+#endif
 }
 
 #if defined(USE_CUDA_CG)
+#if defined(LESS_GLOBALMEM_READS)
+template <int tilesize, int blocksize>
+__global__  
+void local_count_gpu_kernel
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem bound,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+)
+#else
 template <int tilesize, int blocksize>
 __global__  
 void local_count_gpu_kernel
@@ -393,6 +427,7 @@ void local_count_gpu_kernel
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
 )
+#endif
 {
   static_assert(blocksize % tilesize == 0, "Block size must be a multiple of tile size");
   
@@ -436,6 +471,8 @@ void local_count_gpu_kernel
         {
           const GraphElem edge_n = d_edge_list[n];
 
+#if defined(LESS_GLOBALMEM_READS)
+#else
           if (edge_n > d_range[base_edge_m*2+1])
             break;
 
@@ -444,7 +481,7 @@ void local_count_gpu_kernel
 
           if (edge_n < d_range[base_edge_m*2])
             continue;
-
+#endif
           for(GraphElem j = jstart; j < jend; j++)
           {
             if (d_edge_list[j] > edge_n)
@@ -472,6 +509,19 @@ void local_count_gpu_kernel
   }
 }
 #else
+#if defined(LESS_GLOBALMEM_READS)
+template <int blocksize>
+__global__  
+void local_count_gpu_kernel
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem bound,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+)
+#else
 template <int blocksize>
 __global__  
 void local_count_gpu_kernel
@@ -484,6 +534,7 @@ void local_count_gpu_kernel
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
 )
+#endif
 {
   GraphElem tid = threadIdx.x, bid = blockIdx.x, step = gridDim.x;
   volatile __shared__ GraphElem sdata[blocksize];
@@ -509,13 +560,15 @@ void local_count_gpu_kernel
       
       if (g_i < edge_m && (edge_m >= base && edge_m <= bound))
       {
-        const GraphElem jstart = d_indices[edge_m-base];
-        const GraphElem jend = d_indices[edge_m-base+1];
+        const GraphElem jstart = d_indices[base_edge_m];
+        const GraphElem jend = d_indices[base_edge_m+1];
         
         for (GraphElem n = m + 1; n < e1; n++)
         {
           const GraphElem edge_n = d_edge_list[n];
 
+#if defined(LESS_GLOBALMEM_READS)
+#else
           if (edge_n > d_range[base_edge_m*2+1])
             break;
 
@@ -524,6 +577,7 @@ void local_count_gpu_kernel
 
           if (edge_n < d_range[base_edge_m*2])
             continue;
+#endif
 
           for(GraphElem j = jstart; j < jend; j++)
           {
