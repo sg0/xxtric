@@ -618,7 +618,8 @@ void local_count_gpu_inner
  const GraphElem jstart,
  const GraphElem jend,
  const GraphElem* __restrict__ d_edge_list,
- GraphElem* __restrict__ d_local_count
+ GraphElem* __restrict__ d_local_count,
+ cudaStream_t* stream
  )
 {
   const int blocksize = BLOCKDIM03;
@@ -626,9 +627,9 @@ void local_count_gpu_inner
 
 #if defined(USE_CUDA_CG)
   const int tilesize = TILESIZE01;
-  local_count_gpu_inner_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(start, end, jstart, jend, d_edge_list, d_local_count);
+  local_count_gpu_inner_kernel<tilesize, blocksize><<<nblocks, blocksize, 0, (stream == nullptr? 0: *stream)>>>(start, end, jstart, jend, d_edge_list, d_local_count);
 #else
-  local_count_gpu_inner_kernel<blocksize><<<nblocks, blocksize>>>(start, end, jstart, jend, d_edge_list, d_local_count);
+  local_count_gpu_inner_kernel<blocksize><<<nblocks, blocksize, 0, (stream == nullptr? 0: *stream)>>>(start, end, jstart, jend, d_edge_list, d_local_count);
 #endif
 }
 

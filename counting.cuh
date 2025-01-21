@@ -358,7 +358,8 @@ __global__
  const GraphElem jstart,
  const GraphElem jend,
  const GraphElem* __restrict__ d_edge_list,
- GraphElem* __restrict__ d_local_count
+ GraphElem* __restrict__ d_local_count,
+ cudaStream_t* stream
  );
 
 #if defined(USE_CUDA_CG)
