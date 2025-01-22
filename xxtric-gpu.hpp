@@ -299,7 +299,7 @@ class TriangleCounting
     local_edge_range.clear();
     edge_range.clear();
 #else
-    /// create streams
+    /// manage streams
     cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
       cudaStreamCreate(&streams[t]);
@@ -350,10 +350,7 @@ class TriangleCounting
       }
     }
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
-    {
-      cudaStreamSynchronize(streams[t]);
       cudaStreamDestroy(streams[t]);
-    }
     delete []streams;
 #endif
         
@@ -753,10 +750,7 @@ class TriangleCounting
    
 #if defined(USE_ASYNC_STREAMS_AT_RECV)
       for (int t = 0; t < count_rstreams_; t++)
-      {
-        cudaStreamSynchronize(e_rstreams_[t]);
         cudaStreamDestroy(e_rstreams_[t]);
-      }
 #endif
       CudaDeviceSynchronize();
       

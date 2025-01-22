@@ -864,6 +864,8 @@ void local_count_gpu_recv_kernel
     */
   }
 
+  warp.sync();
+
 #pragma unroll
   for(int j = warp.size()/2; j > 0; j /= 2)
     tid_count += __shfl_down_sync(FULL_MASK, tid_count, j);
