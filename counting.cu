@@ -753,6 +753,29 @@ __global__
 }
 #endif
 
+#if defined(USE_ASYNC_STREAMS_AT_RECV)
+ void local_count_gpu_recv
+(
+ const GraphElem count,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_rbuf,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count,
+ cudaStream_t stream
+)
+{
+  const int blocksize = BLOCKDIM02;
+  GraphElem nblocks = (count + blocksize - 1) / blocksize;
+
+#if defined(USE_CUDA_CG)
+  const int tilesize = TILESIZE01;
+  local_count_gpu_recv_kernel<tilesize, blocksize><<<nblocks, blocksize, 0, stream>>>(count, base, d_rbuf, d_indices, d_edge_list, d_local_count);
+#else
+  local_count_gpu_recv_kernel<blocksize><<<nblocks, blocksize, 0, stream>>>(count, base, d_rbuf, d_indices, d_edge_list, d_local_count);
+#endif
+}
+#else
  void local_count_gpu_recv
 (
  const GraphElem count,
@@ -775,6 +798,7 @@ __global__
       d_indices, d_edge_list, d_local_count);
 #endif
 }
+#endif
 
 #if defined(USE_CUDA_CG)
 template <int tilesize, int blocksize>

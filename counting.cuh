@@ -395,6 +395,18 @@ void unroll_last_warp
  GraphElem tid
 );
 
+#if defined(USE_ASYNC_STREAMS_AT_RECV)
+ void local_count_gpu_recv
+(
+ const GraphElem count,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_rbuf,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count,
+ cudaStream_t stream
+);
+#else
  void local_count_gpu_recv
 (
  const GraphElem count,
@@ -404,6 +416,7 @@ void unroll_last_warp
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count 
 );
+#endif
 
 #if defined(USE_CUDA_CG)
 template <int tilesize, int blocksize>
