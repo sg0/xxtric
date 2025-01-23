@@ -300,6 +300,7 @@ class TriangleCounting
     edge_range.clear();
 #else
     /// manage streams
+    GraphElem nst = 0;
     cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
       cudaStreamCreate(&streams[t]);
@@ -325,7 +326,8 @@ class TriangleCounting
         {
           GraphElem jstart, jend;
           g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
-          local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[i % MAX_CUDA_STREAMS]);
+          local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+          nst++;
         }
         else
         {
@@ -647,6 +649,9 @@ class TriangleCounting
         return;
 
       GraphElem base = g_->get_base(rank_);
+#if defined(USE_ASYNC_STREAMS_AT_RECV)
+      GraphElem nst = 0;
+#endif
 
 #if defined(USE_OPENMP)
 #pragma omp parallel for default(shared) reduction(-:in_nghosts_)
@@ -667,9 +672,10 @@ class TriangleCounting
           if (source != MPI_ANY_SOURCE)
           {
 #if defined(USE_ASYNC_STREAMS_AT_RECV)
-            const int s_idx = p % count_rstreams_;
+            const int s_idx = nst % count_rstreams_;
             CudaMemcpyAsyncHtoD(&d_rbuf_[s_idx*bufsize_], &rbuf_[p*bufsize_], count*sizeof(GraphElem), e_rstreams_[s_idx]);
             local_count_gpu_recv(count, base, &d_rbuf_[s_idx*bufsize_], d_eind_, d_elst_, d_ntriangles_, e_rstreams_[s_idx]);
+            nst++;
 #else
             CudaMemcpyHtoD(d_rbuf_, &rbuf_[p*bufsize_], count*sizeof(GraphElem));
             local_count_gpu_recv(count, base, d_rbuf_, d_eind_, d_elst_, d_ntriangles_);
