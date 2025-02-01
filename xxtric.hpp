@@ -127,7 +127,7 @@ class TriangleCounting
         const int owner = g_->get_owner(edge_m.tail_);
         tup[0] = edge_m.tail_;
 
-        if (global_i > tup[0])
+        if (global_i >= tup[0])
           continue;
 
         if (owner == rank_)
@@ -138,9 +138,6 @@ class TriangleCounting
             
             if (!edge_within_max(edge_m.tail_, edge_n.tail_))
               break;
-
-            if (edge_m.tail_ > edge_n.tail_)
-              continue;
 
             if (!edge_above_min(edge_m.tail_, edge_n.tail_))
               continue;
@@ -167,9 +164,6 @@ class TriangleCounting
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
                    
-              if (edge_m.tail_ > edge_n.tail_)
-                continue;
-
               if (!edge_above_min(edge_m.tail_, edge_n.tail_))
                 continue;
 
@@ -199,7 +193,7 @@ class TriangleCounting
         Edge const& edge_m = g_->get_edge(m);
         const int owner = g_->get_owner(edge_m.tail_);
 
-        if (global_i > edge_m.tail_)
+        if (global_i >= edge_m.tail_)
             continue;
 
         if (owner == rank_)
@@ -212,9 +206,6 @@ class TriangleCounting
                 if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                   break;
                                
-                if (edge_m.tail_ > edge_n.tail_)
-                  continue;
-
                 if (!edge_above_min(edge_m.tail_, edge_n.tail_))
                   continue;
 
@@ -237,9 +228,6 @@ class TriangleCounting
                      
                     if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                         break;
-
-                    if (edge_m.tail_ > edge_n.tail_)
-                      continue;
 
                     if (!edge_above_min(edge_m.tail_, edge_n.tail_))
                         continue;
@@ -400,6 +388,9 @@ class TriangleCounting
     
     inline void lookup_edges()
     {
+      if (pdegree_ == 0)
+        return;
+
       const GraphElem lnv = g_->get_lnv();
 
       for (GraphElem i = 0; i < lnv; i++)
@@ -419,7 +410,7 @@ class TriangleCounting
           EdgeStat& edge = g_->get_edge_stat(m);
           const int owner = g_->get_owner(edge.edge_->tail_);
           
-          if (global_i > edge.edge_->tail_)
+          if (global_i >= edge.edge_->tail_)
               continue;
 
           const GraphElem pidx = pindex_[owner];
@@ -449,9 +440,6 @@ class TriangleCounting
               {  
                 Edge const& edge_n = g_->get_edge(n); 
                     
-                if (edge.edge_->tail_ > edge_n.tail_)
-                  continue;
-
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
 

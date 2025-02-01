@@ -196,14 +196,10 @@ void combined_local_count_gpu_kernel
       }
     }
     
-    warp.sync();
-
 #pragma unroll
     for(int j = warp.size()/2; j > 0; j /= 2)
       count += __shfl_down_sync(FULL_MASK, count, j);
     
-    warp.sync();
-
     if (warp_tid == 0)
       atomicAdd((unsigned long long int*)d_local_count, count);
   }
@@ -496,14 +492,10 @@ void local_count_gpu_kernel
       }
     }
     
-    warp.sync();
-
 #pragma unroll
     for(int j = warp.size()/2; j > 0; j /= 2)
       count += __shfl_down_sync(FULL_MASK, count, j);
     
-    warp.sync();
-
     if (warp_tid == 0)
       atomicAdd((unsigned long long int*)d_local_count, count);
   }
@@ -669,29 +661,35 @@ __global__
   const GraphElem warp_tid = warp.thread_rank();
 
   GraphElem* t_range = &range[(block_tid/WarpSize)*2];
-  GraphElem b0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
   GraphElem count = 0;
+  const GraphElem b0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+  const GraphElem edge_m = d_edge_list[start-1];
+    
+  warp.sync();
 
   for (GraphElem i = start + b0; i < end; i += step*(BlockSize/WarpSize))
   {
     const GraphElem edge_i = d_edge_list[i];
     
-    for(GraphElem k = jstart + warp_tid; k < jend; k += WarpSize)
+    if (edge_m < edge_i)
     {
-      if (d_edge_list[k] == edge_i)
-        count++;
-      
-      if (__any_sync(__activemask(), d_edge_list[k] >= edge_i))
-        break;
-      /*
-      if (d_edge_list[k] > edge_i)
-        break;
-      if (d_edge_list[k] == edge_i)
+      for(GraphElem k = jstart + warp_tid; k < jend; k += WarpSize)
       {
-        count++;
-        break;
+        if (d_edge_list[k] == edge_i)
+          count++;
+
+        if (__any_sync(__activemask(), d_edge_list[k] >= edge_i))
+          break;
+        /*
+           if (d_edge_list[k] > edge_i)
+           break;
+           if (d_edge_list[k] == edge_i)
+           {
+           count++;
+           break;
+           }
+         */
       }
-      */
     }
   }
 
@@ -718,20 +716,24 @@ __global__
   volatile __shared__ GraphElem sdata[blocksize];
   GraphElem tid = threadIdx.x, bid = blockIdx.x, step = gridDim.x;
   sdata[tid] = 0;
+  const GraphElem edge_m = d_edge_list[start-1];
     
   __syncthreads();
   
   for (GraphElem i = start + bid; i < end; i += step)
   {
     const GraphElem edge_i = d_edge_list[i];
-    for(GraphElem k = jstart + tid; k < jend; k += blocksize)
+    if (edge_m < edge_i)
     {
-      if (d_edge_list[k] > edge_i)
-        break;
-      if (d_edge_list[k] == edge_i)
+      for(GraphElem k = jstart + tid; k < jend; k += blocksize)
       {
-        sdata[tid]++;
-        break;
+        if (d_edge_list[k] > edge_i)
+          break;
+        if (d_edge_list[k] == edge_i)
+        {
+          sdata[tid]++;
+          break;
+        }
       }
     }
   }
@@ -1064,14 +1066,10 @@ __global__
       }
     }
     
-    warp.sync();
-
 #pragma unroll
     for(int j = warp.size()/2; j > 0; j /= 2)
       count += __shfl_down_sync(FULL_MASK, count, j);
     
-    warp.sync();
-
     if (warp_tid == 0)
       atomicAdd((unsigned long long int*)d_local_count, count);
   }
