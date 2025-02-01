@@ -122,7 +122,7 @@ class TriangleCounting
     cudaGetDeviceCount(&deviceCount);
     cudaSetDevice(rank_%deviceCount);
 
-#if defined(LESS_GLOBALMEM_READS)
+#if defined(LESS_GLOBALMEM_READS) && !defined(COMBINED_LOCAL_COUNTING_KERNEL)
 #else
     GraphElem* d_range = nullptr;
     CudaMalloc(d_range, 2*lnv*sizeof(GraphElem));
@@ -133,7 +133,7 @@ class TriangleCounting
 
     CudaMemcpyHtoD(d_eind_, g_->edge_indices_.data(), (lnv+1)*sizeof(GraphElem));
     CudaMemcpyHtoD(d_elst_, etails.data(), lne*sizeof(GraphElem));
-#if defined(LESS_GLOBALMEM_READS)
+#if defined(LESS_GLOBALMEM_READS) && !defined(COMBINED_LOCAL_COUNTING_KERNEL)
 #else
     CudaMemcpyHtoD(d_range, &erange_[2*base], 2*lnv*sizeof(GraphElem));
 #endif
@@ -183,7 +183,7 @@ class TriangleCounting
         Edge const& edge_m = g_->get_edge(m);
         const int owner = g_->get_owner(edge_m.tail_);
 
-        if (global_i > edge_m.tail_)
+        if (global_i >= edge_m.tail_)
           continue;
 
         if (owner > rank_)
@@ -191,9 +191,6 @@ class TriangleCounting
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
-
-            if (edge_m.tail_ > edge_n.tail_)
-              continue;
 
             if (!edge_within_max(edge_m.tail_, edge_n.tail_))
               break;
@@ -229,7 +226,7 @@ class TriangleCounting
         Edge const& edge_m = g_->get_edge(m);
         const int owner = g_->get_owner(edge_m.tail_);
         
-        if (global_i > edge_m.tail_)
+        if (global_i >= edge_m.tail_)
           continue;
         
         if (owner == rank_)
@@ -251,8 +248,6 @@ class TriangleCounting
             {
               Edge const& edge_n = g_->get_edge(n);
 
-              if (edge_m.tail_ > edge_n.tail_)
-                continue;
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
               if (!edge_above_min(edge_m.tail_, edge_n.tail_))
@@ -319,7 +314,7 @@ class TriangleCounting
         Edge const& edge_m = g_->get_edge(m);
         const int owner = g_->get_owner(edge_m.tail_);
         
-        if (global_i > edge_m.tail_)
+        if (global_i >= edge_m.tail_)
           continue;
         
         if (owner == rank_)
@@ -337,8 +332,6 @@ class TriangleCounting
             {
               Edge const& edge_n = g_->get_edge(n);
 
-              if (edge_m.tail_ > edge_n.tail_)
-                continue;
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
               if (!edge_above_min(edge_m.tail_, edge_n.tail_))
@@ -455,7 +448,7 @@ class TriangleCounting
 #endif
     
     delete []send_count;
-#if defined(LESS_GLOBALMEM_READS)
+#if defined(LESS_GLOBALMEM_READS) && !defined(COMBINED_LOCAL_COUNTING_KERNEL)
 #else
     CudaFree(d_range);
 #endif
@@ -533,6 +526,9 @@ class TriangleCounting
     
     inline void lookup_edges()
     {
+      if (pdegree_ == 0)
+        return;
+      
       const GraphElem lnv = g_->get_lnv();
 
       for (GraphElem i = 0; i < lnv; i++)
@@ -552,7 +548,7 @@ class TriangleCounting
           EdgeStat& edge = g_->get_edge_stat(m);
           const int owner = g_->get_owner(edge.edge_->tail_);
           
-          if (global_i > edge.edge_->tail_)
+          if (global_i >= edge.edge_->tail_)
               continue;
 
           const GraphElem pidx = pindex_[owner];
@@ -579,9 +575,6 @@ class TriangleCounting
               { 
                 Edge const& edge_n = g_->get_edge(n); 
                     
-                if (edge.edge_->tail_ > edge_n.tail_)
-                  continue;
-
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
                 

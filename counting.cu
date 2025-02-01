@@ -139,7 +139,7 @@ void combined_local_count_gpu_kernel
       const GraphElem base_edge_m = edge_m-base;
       const GraphElem owner = lower_bound(size+1, edge_m, d_parts);
 
-      if (g_i > edge_m)
+      if (g_i < edge_m)
       {
         if (owner == rank)
         {
@@ -152,9 +152,6 @@ void combined_local_count_gpu_kernel
 
             if (edge_n > d_range[base_edge_m*2+1])
               break;
-
-            if (edge_m > edge_n)
-              continue;
 
             if (edge_n < d_range[base_edge_m*2])
               continue;
@@ -181,9 +178,6 @@ void combined_local_count_gpu_kernel
 
               if (edge_n > d_range[base_edge_m*2+1])
                 break;
-
-              if (edge_m > edge_n)
-                continue;
 
               if (edge_n < d_range[base_edge_m*2])
                 continue;
@@ -263,9 +257,6 @@ void combined_local_count_gpu_kernel
             if (edge_n > d_range[base_edge_m*2+1])
               break;
 
-            if (edge_m > edge_n)
-              continue;
-
             if (edge_n < d_range[base_edge_m*2])
               continue;
 
@@ -291,9 +282,6 @@ void combined_local_count_gpu_kernel
 
               if (edge_n > d_range[base_edge_m*2+1])
                 break;
-
-              if (edge_m > edge_n)
-                continue;
 
               if (edge_n < d_range[base_edge_m*2])
                 continue;
@@ -472,9 +460,6 @@ void local_count_gpu_kernel
           if (edge_n > d_range[base_edge_m*2+1])
             break;
 
-          if (edge_m > edge_n)
-            continue;
-
           if (edge_n < d_range[base_edge_m*2])
             continue;
 #endif
@@ -563,9 +548,6 @@ void local_count_gpu_kernel
 #else
           if (edge_n > d_range[base_edge_m*2+1])
             break;
-
-          if (edge_m > edge_n)
-            continue;
 
           if (edge_n < d_range[base_edge_m*2])
             continue;
@@ -663,33 +645,29 @@ __global__
   GraphElem* t_range = &range[(block_tid/WarpSize)*2];
   GraphElem count = 0;
   const GraphElem b0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
-  const GraphElem edge_m = d_edge_list[start-1];
     
   warp.sync();
 
   for (GraphElem i = start + b0; i < end; i += step*(BlockSize/WarpSize))
   {
     const GraphElem edge_i = d_edge_list[i];
-    
-    if (edge_m < edge_i)
-    {
-      for(GraphElem k = jstart + warp_tid; k < jend; k += WarpSize)
-      {
-        if (d_edge_list[k] == edge_i)
-          count++;
 
-        if (__any_sync(__activemask(), d_edge_list[k] >= edge_i))
-          break;
-        /*
-           if (d_edge_list[k] > edge_i)
-           break;
-           if (d_edge_list[k] == edge_i)
-           {
-           count++;
-           break;
-           }
-         */
-      }
+    for(GraphElem k = jstart + warp_tid; k < jend; k += WarpSize)
+    {
+      if (d_edge_list[k] == edge_i)
+        count++;
+
+      if (__any_sync(__activemask(), d_edge_list[k] >= edge_i))
+        break;
+      /*
+         if (d_edge_list[k] > edge_i)
+         break;
+         if (d_edge_list[k] == edge_i)
+         {
+         count++;
+         break;
+         }
+       */
     }
   }
 
@@ -723,17 +701,15 @@ __global__
   for (GraphElem i = start + bid; i < end; i += step)
   {
     const GraphElem edge_i = d_edge_list[i];
-    if (edge_m < edge_i)
+
+    for(GraphElem k = jstart + tid; k < jend; k += blocksize)
     {
-      for(GraphElem k = jstart + tid; k < jend; k += blocksize)
+      if (d_edge_list[k] > edge_i)
+        break;
+      if (d_edge_list[k] == edge_i)
       {
-        if (d_edge_list[k] > edge_i)
-          break;
-        if (d_edge_list[k] == edge_i)
-        {
-          sdata[tid]++;
-          break;
-        }
+        sdata[tid]++;
+        break;
       }
     }
   }
@@ -1046,10 +1022,7 @@ __global__
                 
         if (edge_n > d_range[base_edge_m*2+1])
           break;
-                               
-        if (edge_m > edge_n)
-          continue;
-
+      
         if (edge_n < d_range[base_edge_m*2])
           continue;
         
@@ -1065,7 +1038,9 @@ __global__
         }
       }
     }
-    
+
+    warp.sync();
+
 #pragma unroll
     for(int j = warp.size()/2; j > 0; j /= 2)
       count += __shfl_down_sync(FULL_MASK, count, j);
@@ -1126,9 +1101,6 @@ __global__
         if (edge_n > d_range[base_edge_m*2+1])
           break;
                                
-        if (edge_m > edge_n)
-          continue;
-
         if (edge_n < d_range[base_edge_m*2])
           continue;
 
@@ -1290,7 +1262,7 @@ __global__
       }
     }
   }
-
+    
 #pragma unroll
   for(int j = warp.size()/2; j > 0; j /= 2)
     count += __shfl_down_sync(FULL_MASK, count, j);
