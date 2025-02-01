@@ -654,20 +654,20 @@ __global__
 
     for(GraphElem k = jstart + warp_tid; k < jend; k += WarpSize)
     {
+      /*
       if (d_edge_list[k] == edge_i)
         count++;
 
-      if (__any_sync(__activemask(), d_edge_list[k] >= edge_i))
+        if (__any_sync(__activemask(), d_edge_list[k] >= edge_i))
         break;
-      /*
-         if (d_edge_list[k] > edge_i)
-         break;
-         if (d_edge_list[k] == edge_i)
-         {
-         count++;
-         break;
-         }
        */
+      if (d_edge_list[k] > edge_i)
+        break;
+      if (d_edge_list[k] == edge_i)
+      {
+        count++;
+        break;
+      }
     }
   }
 
@@ -820,6 +820,7 @@ void local_count_gpu_recv_kernel
     const GraphElem end = t_range[1];
     const GraphElem edge = d_rbuf[ind+1];
 
+    /*
     for(GraphElem k = start + warp_tid; k < end; k += WarpSize)
     {
       if (d_edge_list[k] == edge)
@@ -828,7 +829,7 @@ void local_count_gpu_recv_kernel
       if (__any_sync(__activemask(), d_edge_list[k] >= edge))
         break;
     }
-    /*
+    */
     for(GraphElem k = start + warp_tid; k < end; k += WarpSize)
     {
       if (d_edge_list[k] > edge)
@@ -839,9 +840,7 @@ void local_count_gpu_recv_kernel
         break;
       }
     }
-    */
   }
-
 #pragma unroll
   for(int j = warp.size()/2; j > 0; j /= 2)
     tid_count += __shfl_down_sync(FULL_MASK, tid_count, j);
@@ -1038,8 +1037,6 @@ __global__
         }
       }
     }
-
-    warp.sync();
 
 #pragma unroll
     for(int j = warp.size()/2; j > 0; j /= 2)
