@@ -367,12 +367,12 @@ class TriangleCounting
     for (GraphElem i = idx.size()/2; i < idx.size(); i++)
     {
       GraphElem e0, e1, jstart, jend;
-      g_->edge_range(v_edge_mask[idx[i]*2], e0, e1);
-      Edge const& edge_m = g_->get_edge(v_edge_mask[idx[i]*2+1]);
+      g_->edge_range(edge_mask[idx[i]*3], e0, e1);
+      Edge const& edge_m = g_->get_edge(edge_mask[idx[i]*3+1]);
 
       g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
 
-      local_count_gpu_inner(v_edge_mask[idx[i]*2+1]+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+      local_count_gpu_inner(edge_mask[idx[i]*3+1]+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
 
       nst++;
     }
