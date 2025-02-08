@@ -1443,36 +1443,28 @@ __global__
 
     warp.sync();
 
-    const GraphElem start = t_range[0];
-    const GraphElem end = t_range[1];
-    const GraphElem col = t_range[2];
+    const GraphElem e_start = t_range[0];
+    const GraphElem e_end = t_range[1];
+    const GraphElem m = t_range[2];
+    const GraphElem edge_m = d_edge_list[m];
+    const GraphElem base_edge_m = edge_m-base;
+    const GraphElem nstart = d_indices[base_edge_m];
+    const GraphElem nend = d_indices[base_edge_m+1];
 
-    for(GraphElem j = col + 1 + warp_tid; j < nedges; j += WarpSize)
+    for(GraphElem j = m + 1 + warp_tid; j < e_end; j += WarpSize)
     {
       const GraphElem edge_j = d_edge_list[j];
 
-      for(GraphElem m = start; m <= end; m++)
+      for(GraphElem n = nstart; n < nend; n++)
       {
-        const GraphElem edge_m = d_edge_list[m];
-        
-        if ((m != j) && (edge_j > edge_m))
+        const GraphElem edge_n = d_edge_list[n];
+
+        if (edge_n > edge_j)
+          break;
+        if (edge_n == edge_j)
         {
-          const GraphElem base_edge_m = edge_m-base;
-          const GraphElem nstart = d_indices[base_edge_m];
-          const GraphElem nend = d_indices[base_edge_m+1];
-
-          for(GraphElem n = nstart; n < nend; n++)
-          {
-            const GraphElem edge_n = d_edge_list[n];
-
-            if (edge_n > edge_j)
-              break;
-            if (edge_n == edge_j)
-            {
-              count++;
-              break;
-            }
-          }
+          count++;
+          break;
         }
       }
     }
