@@ -1436,16 +1436,15 @@ __global__
     if(warp_tid == 0)
     {
       const GraphElem id = 2*i;
-      t_range[0] = d_indices[d_edge_mask[id]];
-      t_range[1] = d_indices[d_edge_mask[id]+1];
-      t_range[2] = d_edge_mask[id+1];
+      t_range[0] = d_indices[d_edge_mask[id]+1];
+      t_range[1] = d_edge_mask[id+1];
     }
 
     warp.sync();
 
-    const GraphElem e_start = t_range[0];
-    const GraphElem e_end = t_range[1];
-    const GraphElem m = t_range[2];
+    const GraphElem e_end = t_range[0];
+    const GraphElem m = t_range[1];
+    
     const GraphElem edge_m = d_edge_list[m];
     const GraphElem base_edge_m = edge_m-base;
     const GraphElem nstart = d_indices[base_edge_m];
@@ -1492,7 +1491,7 @@ __global__
 {
   GraphElem tid = threadIdx.x, bid = blockIdx.x, step = gridDim.x;
   volatile __shared__ GraphElem sdata[blocksize];
-  __shared__ GraphElem range[3];
+  __shared__ GraphElem range[2];
   sdata[tid] = 0;
     
   __syncthreads();
@@ -1502,43 +1501,33 @@ __global__
     if(tid == 0)
     {
       const GraphElem id = 2*i;
-      range[0] = d_indices[d_edge_mask[id]];
-      range[1] = d_indices[d_edge_mask[id]+1];
-      range[2] = d_edge_mask[id+1];
+      range[0] = d_indices[d_edge_mask[id]+1];
+      range[1] = d_edge_mask[id+1];
     }
 
     __syncthreads();
 
-    const GraphElem e0 = range[0];
-    const GraphElem e1 = range[1];
-    const GraphElem start = range[2];
-   
-    for(GraphElem j = start + 1 + tid; j < nedges; j += blocksize)
+    const GraphElem e1 = range[0];
+    const GraphElem start = range[1];
+    const GraphElem edge_m = d_edge_list[start];
+    const GraphElem base_edge_m = edge_m-base;
+    const GraphElem nstart = d_indices[base_edge_m];
+    const GraphElem nend = d_indices[base_edge_m+1];
+
+    for(GraphElem j = start + 1 + tid; j < e1; j += blocksize)
     {
       const GraphElem edge_j = d_edge_list[j];
 
-      for(GraphElem m = e0; m <= e1; m++)
+      for(GraphElem n = nstart; n < nend; n++)
       {
-        const GraphElem edge_m = d_edge_list[m];
-        
-        if ((m != j) && (edge_j > edge_m))
+        const GraphElem edge_n = d_edge_list[n];
+
+        if (edge_n > edge_j)
+          break;
+        if (edge_n == edge_j)
         {
-          const GraphElem base_edge_m = edge_m-base;
-          const GraphElem nstart = d_indices[base_edge_m];
-          const GraphElem nend = d_indices[base_edge_m+1];
-
-          for(GraphElem n = nstart; n < nend; n++)
-          {
-            const GraphElem edge_n = d_edge_list[n];
-
-            if (edge_n > edge_j)
-              break;
-            if (edge_n == edge_j)
-            {
-              sdata[tid]++;
-              break;
-            }
-          }
+          sdata[tid]++;
+          break;
         }
       }
     }
