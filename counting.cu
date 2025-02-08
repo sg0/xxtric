@@ -654,13 +654,12 @@ __global__
 
     for(GraphElem k = jstart + warp_tid; k < jend; k += WarpSize)
     {
-      /*
       if (d_edge_list[k] == edge_i)
         count++;
 
         if (__any_sync(__activemask(), d_edge_list[k] >= edge_i))
         break;
-       */
+      /*
       if (d_edge_list[k] > edge_i)
         break;
       if (d_edge_list[k] == edge_i)
@@ -668,6 +667,7 @@ __global__
         count++;
         break;
       }
+       */
     }
   }
 
@@ -820,7 +820,6 @@ void local_count_gpu_recv_kernel
     const GraphElem end = t_range[1];
     const GraphElem edge = d_rbuf[ind+1];
 
-    /*
     for(GraphElem k = start + warp_tid; k < end; k += WarpSize)
     {
       if (d_edge_list[k] == edge)
@@ -829,7 +828,7 @@ void local_count_gpu_recv_kernel
       if (__any_sync(__activemask(), d_edge_list[k] >= edge))
         break;
     }
-    */
+    /*
     for(GraphElem k = start + warp_tid; k < end; k += WarpSize)
     {
       if (d_edge_list[k] > edge)
@@ -840,6 +839,7 @@ void local_count_gpu_recv_kernel
         break;
       }
     }
+    */
   }
 #pragma unroll
   for(int j = warp.size()/2; j > 0; j /= 2)
@@ -1350,6 +1350,222 @@ __global__
     atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
 }
 #endif
+
+void local_count_gpu_masked3
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+)
+{
+  const int blocksize = BLOCKDIM03;
+  const GraphElem nblocks = (nedges + blocksize - 1) / blocksize;
+
+#if defined(CALC_WARP_OCCUPANCY)
+    int device, numBlocks;
+    cudaDeviceProp prop;
+    int activeWarps;
+    int maxWarps;
+    int len = 15;
+    char gpu_id[15];
+
+    cudaGetDevice(&device);
+    cudaGetDeviceProperties(&prop, device);
+
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &numBlocks,
+#if defined(USE_CUDA_CG)
+        local_count_gpu_masked3_kernel<TILESIZE01, blocksize>,
+#else
+        local_count_gpu_masked3_kernel<blocksize>,
+#endif
+        blocksize,
+        0);
+
+    cudaDeviceGetPCIBusId(gpu_id, len, device);
+    std::string str_gpu(gpu_id);
+    
+    activeWarps = numBlocks * blocksize / prop.warpSize;
+    maxWarps = prop.maxThreadsPerMultiProcessor / prop.warpSize;
+
+    std::cout << "Masked(3) Kernel Occupancy (" << str_gpu << "): " << (double)activeWarps / maxWarps * 100 << "%" << std::endl;
+#endif  
+#if defined(USE_CUDA_CG)
+  const int tilesize = TILESIZE01;
+  local_count_gpu_masked3_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(nedges, d_edge_mask, d_indices, d_edge_list, d_local_count);
+#else
+  local_count_gpu_masked3_kernel<blocksize><<<nblocks, blocksize>>>(nedges, d_edge_mask, d_indices, d_edge_list, d_local_count);
+#endif
+}
+
+#if defined(USE_CUDA_CG)
+template <int tilesize, int blocksize>
+__global__  
+ void local_count_gpu_masked3_kernel
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+)
+{
+  static_assert(blocksize % tilesize == 0, "Block size must be a multiple of tile size");
+  
+  const GraphElem bid = blockIdx.x, step = gridDim.x;
+  const int WarpSize = tilesize, BlockSize = blocksize;
+  __shared__ GraphElem range[(BlockSize/WarpSize)*3];
+
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
+
+  const GraphElem block_tid = block.thread_rank();
+  const GraphElem warp_tid = warp.thread_rank();
+
+  GraphElem* t_range = &range[(block_tid/WarpSize)*3];
+  GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+  GraphElem count = 0;
+
+  for (GraphElem i = i0; i < nedges; i += step*(BlockSize/WarpSize))
+  {
+    if(warp_tid == 0)
+    {
+      const GraphElem id = 2*i;
+      t_range[0] = d_indices[d_edge_mask[id]];
+      t_range[1] = d_indices[d_edge_mask[id]+1];
+      t_range[2] = d_edge_mask[id+1];
+    }
+
+    warp.sync();
+
+    const GraphElem start = t_range[0];
+    const GraphElem end = t_range[1];
+    const GraphElem scale = t_range[2];
+
+    for(GraphElem j = start + 1 + warp_tid; j < last; j += WarpSize)
+    {
+      const GraphElem edge_j = d_edge_list[j];
+
+      for(GraphElem m = start; m <= end; m++)
+      {
+        const GraphElem edge_m = d_edge_list[m];
+        
+        if ((m != j) && (edge_j > edge_m))
+        {
+          const GraphElem base_edge_m = edge_m-base;
+          const GraphElem nstart = d_indices[base_edge_m];
+          const GraphElem nend = d_indices[base_edge_m+1];
+
+          for(GraphElem n = nstart; n < nend; n++)
+          {
+            const GraphElem edge_n = d_edge_list[n];
+
+            if (edge_n > edge_j)
+              break;
+            if (edge_n == edge_j)
+            {
+              count++;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+    
+#pragma unroll
+  for(int j = warp.size()/2; j > 0; j /= 2)
+    count += __shfl_down_sync(FULL_MASK, count, j);
+
+  if (warp_tid == 0)
+    atomicAdd((unsigned long long int*)d_local_count, count);
+}
+#else
+template <int blocksize>
+__global__  
+ void local_count_gpu_masked2_kernel
+(
+ const GraphElem lnv,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+)
+{
+  GraphElem tid = threadIdx.x, bid = blockIdx.x, step = gridDim.x;
+  volatile __shared__ GraphElem sdata[blocksize];
+  __shared__ GraphElem range[3];
+  sdata[tid] = 0;
+    
+  __syncthreads();
+
+  for (GraphElem i = bid; i < lnv; i += step)
+  {
+    if(tid == 0)
+    {
+      const GraphElem id = 3*i;
+      range[0] = d_edge_mask[id+1];
+      range[1] = d_edge_mask[id+2];
+      range[2] = d_indices[d_edge_mask[id]+1];
+    }
+
+    __syncthreads();
+
+    const GraphElem e0 = range[0];
+    const GraphElem e1 = range[1];
+    const GraphElem last = range[2];
+   
+    for(GraphElem j = e0 + 1 + tid; j < last; j += blocksize)
+    {
+      const GraphElem edge_j = d_edge_list[j];
+
+      for(GraphElem m = e0; m <= e1; m++)
+      {
+        const GraphElem edge_m = d_edge_list[m];
+        
+        if ((m != j) && (edge_j > edge_m))
+        {
+          const GraphElem base_edge_m = edge_m-base;
+          const GraphElem nstart = d_indices[base_edge_m];
+          const GraphElem nend = d_indices[base_edge_m+1];
+
+          for(GraphElem n = nstart; n < nend; n++)
+          {
+            const GraphElem edge_n = d_edge_list[n];
+
+            if (edge_n > edge_j)
+              break;
+            if (edge_n == edge_j)
+            {
+              sdata[tid]++;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+    
+  __syncthreads();
+
+  for (GraphElem s=blocksize/2; s>32; s>>=1) 
+  {
+    if (tid < s)
+      sdata[tid] += sdata[tid + s];
+    __syncthreads();
+  }
+
+  if (tid < 32)
+    unroll_last_warp(sdata, tid);   
+
+  if (tid == 0)
+    atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
+}
+#endif
+
 
 /// CPU kernels
 

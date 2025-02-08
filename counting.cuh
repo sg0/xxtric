@@ -350,6 +350,39 @@ __global__
  GraphElem* __restrict__ d_local_count
 );
 #endif
+ 
+ void local_count_gpu_masked3
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+
+#if defined(USE_CUDA_CG)
+template <int tilesize, int blocksize>
+__global__  
+ void local_count_gpu_masked3_kernel
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#else
+template <int blocksize>
+__global__  
+ void local_count_gpu_masked3_kernel
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#endif
 
  void local_count_gpu_inner
 (

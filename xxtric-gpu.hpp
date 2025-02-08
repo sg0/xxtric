@@ -87,10 +87,51 @@ class TriangleCounting
     recv_count_  = new GraphElem[size_]();
     std::vector<GraphElem> etails(lne);
 
-    double t0 = MPI_Wtime();
+    // TODO FIXME uncomment back after checking perf
+    //double t0 = MPI_Wtime();
 
     // store edge ranges
     const GraphElem base = g_->get_base(rank_);
+#if defined(SPLIT_LOCAL_COUNTING_KERNEL)
+    std::vector<GraphElem> edge_mask;
+
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1;
+      const GraphElem global_i = g_->local_to_global(i);
+      g_->edge_range(i, e0, e1);
+
+      if ((e0 + 1) == e1)
+        continue;
+
+      for (GraphElem m = e0; m < e1; m++)
+      {
+        Edge const& edge_m = g_->get_edge(m);
+        etails[m] = edge_m.tail_;
+
+        if (m != (e1-1) && global_i >= etails[m] && g_->get_owner(etails[m]) == rank_)
+        {
+          GraphElem le0, le1;
+          g_->edge_range(g_->global_to_local(etails[m], le0, le1);
+
+          edge_mask.push_back(i);
+          edge_mask.push_back(m);
+          edge_mask.push_back(le1 - le0 + 1);
+        }
+      }
+
+      Edge const& edge_s = g_->get_edge(e0);
+      Edge const& edge_t = g_->get_edge(e1-1);
+
+      erange_[(i + base)*2] = edge_s.tail_;
+      erange_[(i + base)*2+1] = edge_t.tail_;
+    }
+
+    std::vector<GraphElem> idx(edge_mask.size()/3);
+    std::iota(idx.begin(), idx.end(), 0);
+    std::stable_sort(idx.begin(), idx.end(), 
+      [&edge_mask](GraphElem id1, GraphElem id2) { return edge_mask[id1*3+1] > edge_mask[id2*3+1]; });
+#else
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1;
@@ -111,12 +152,16 @@ class TriangleCounting
       erange_[(i + base)*2] = edge_s.tail_;
       erange_[(i + base)*2+1] = edge_t.tail_;
     }
+#endif
     
     MPI_Barrier(comm_);
 
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
+    // TODO FIXME move back before this loop after checking perf
+    double t0 = MPI_Wtime();
+    
     /// assume all tasks/node can see all GPUs in a node
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
@@ -293,6 +338,87 @@ class TriangleCounting
 
     local_edge_range.clear();
     edge_range.clear();
+#elif defined(SPLIT_LOCAL_COUNTING_KERNEL)
+    GraphElem* d_edge_mask = nullptr;
+    std::vector<GraphElem> v_edge_mask;
+    
+    // copy 50% of the largest local edges in terms 
+    // of neighborhood size 
+    for (GraphElem i = 0; i < idx.size()/2; i++)
+    {
+      v_edge_mask.push_back(edge_mask[idx*3]);
+      v_edge_mask.push_back(edge_mask[idx*3+1]);
+    }
+    const GraphElem nedges = v_edge_mask.size()/2;
+    CudaMalloc(d_edge_mask, nedges*2*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*2*sizeof(GraphElem));
+    
+    /// manage streams
+    GraphElem nst = 0;
+    cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
+    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
+      cudaStreamCreate(&streams[t]);
+
+    // bulk GPU kernel
+    local_count_gpu_masked3(nedges, d_range, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, &streams[0]);
+    nst++;
+
+    // remaining GPU kernels
+    for (GraphElem i = idx.size()/2; i < idx.size(); i++)
+    {
+      GraphElem e0, e1, jstart, jend;
+      g_->edge_range(v_edge_mask[i], e0, e1);
+      Edge const& edge_m = g_->get_edge(v_edge_mask[i+1]);
+
+      g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
+
+      local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+
+      nst++;
+    }
+
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1, tup[2];
+      g_->edge_range(i, e0, e1);
+      const GraphElem global_i = g_->local_to_global(i);
+
+      if ((e0 + 1) == e1)
+        continue;
+
+      for (GraphElem m = e0; m < e1-1; m++)
+      {
+        Edge const& edge_m = g_->get_edge(m);
+        const int owner = g_->get_owner(edge_m.tail_);
+
+        if (global_i >= edge_m.tail_)
+          continue;
+
+        if (owner > rank_)
+        {
+          for (GraphElem n = m + 1; n < e1; n++)
+          {
+            Edge const& edge_n = g_->get_edge(n);
+
+            if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+              break;
+            if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+              continue;
+
+            send_count[owner] += 2;
+            vcount_[i] += 1;
+          }
+        }
+      }
+    }
+
+    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
+      cudaStreamDestroy(streams[t]);
+    delete []streams;
+
+    idx.clear();
+    v_edge_mask.clear();
+    edge_mask.clear();
 #else
     /// manage streams
     GraphElem nst = 0;
