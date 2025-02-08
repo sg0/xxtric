@@ -112,7 +112,7 @@ class TriangleCounting
         if (m != (e1-1) && global_i >= etails[m] && g_->get_owner(etails[m]) == rank_)
         {
           GraphElem le0, le1;
-          g_->edge_range(g_->global_to_local(etails[m], le0, le1);
+          g_->edge_range(g_->global_to_local(etails[m]), le0, le1);
 
           edge_mask.push_back(i);
           edge_mask.push_back(m);
@@ -346,8 +346,8 @@ class TriangleCounting
     // of neighborhood size 
     for (GraphElem i = 0; i < idx.size()/2; i++)
     {
-      v_edge_mask.push_back(edge_mask[idx*3]);
-      v_edge_mask.push_back(edge_mask[idx*3+1]);
+      v_edge_mask.push_back(edge_mask[i*3]);
+      v_edge_mask.push_back(edge_mask[i*3+1]);
     }
     const GraphElem nedges = v_edge_mask.size()/2;
     CudaMalloc(d_edge_mask, nedges*2*sizeof(GraphElem));
@@ -360,7 +360,7 @@ class TriangleCounting
       cudaStreamCreate(&streams[t]);
 
     // bulk GPU kernel
-    local_count_gpu_masked3(nedges, d_range, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, &streams[0]);
+    local_count_gpu_masked3(nedges, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[0]);
     nst++;
 
     // remaining GPU kernels
@@ -372,11 +372,12 @@ class TriangleCounting
 
       g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
 
-      local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+      local_count_gpu_inner(v_edge_mask[i+1]+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
 
       nst++;
     }
 
+    // remote
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];

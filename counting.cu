@@ -1354,10 +1354,12 @@ __global__
 void local_count_gpu_masked3
 (
  const GraphElem nedges,
+ const GraphElem base,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
- GraphElem* __restrict__ d_local_count
+ GraphElem* __restrict__ d_local_count,
+ cudaStream_t stream
 )
 {
   const int blocksize = BLOCKDIM03;
@@ -1394,9 +1396,9 @@ void local_count_gpu_masked3
 #endif  
 #if defined(USE_CUDA_CG)
   const int tilesize = TILESIZE01;
-  local_count_gpu_masked3_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(nedges, d_edge_mask, d_indices, d_edge_list, d_local_count);
+  local_count_gpu_masked3_kernel<tilesize, blocksize><<<nblocks, blocksize, 0, stream>>>(nedges, base, d_edge_mask, d_indices, d_edge_list, d_local_count);
 #else
-  local_count_gpu_masked3_kernel<blocksize><<<nblocks, blocksize>>>(nedges, d_edge_mask, d_indices, d_edge_list, d_local_count);
+  local_count_gpu_masked3_kernel<blocksize><<<nblocks, blocksize, 0, stream>>>(nedges, base, d_edge_mask, d_indices, d_edge_list, d_local_count);
 #endif
 }
 
@@ -1406,6 +1408,7 @@ __global__
  void local_count_gpu_masked3_kernel
 (
  const GraphElem nedges,
+ const GraphElem base,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
@@ -1416,7 +1419,7 @@ __global__
   
   const GraphElem bid = blockIdx.x, step = gridDim.x;
   const int WarpSize = tilesize, BlockSize = blocksize;
-  __shared__ GraphElem range[(BlockSize/WarpSize)*3];
+  __shared__ GraphElem range[(BlockSize/WarpSize)*2];
 
   cg::thread_block block = cg::this_thread_block();
   cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
@@ -1424,7 +1427,7 @@ __global__
   const GraphElem block_tid = block.thread_rank();
   const GraphElem warp_tid = warp.thread_rank();
 
-  GraphElem* t_range = &range[(block_tid/WarpSize)*3];
+  GraphElem* t_range = &range[(block_tid/WarpSize)*2];
   GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
   GraphElem count = 0;
 
@@ -1442,9 +1445,9 @@ __global__
 
     const GraphElem start = t_range[0];
     const GraphElem end = t_range[1];
-    const GraphElem scale = t_range[2];
+    const GraphElem col = t_range[2];
 
-    for(GraphElem j = start + 1 + warp_tid; j < last; j += WarpSize)
+    for(GraphElem j = col + 1 + warp_tid; j < nedges; j += WarpSize)
     {
       const GraphElem edge_j = d_edge_list[j];
 
@@ -1485,9 +1488,9 @@ __global__
 #else
 template <int blocksize>
 __global__  
- void local_count_gpu_masked2_kernel
+ void local_count_gpu_masked3_kernel
 (
- const GraphElem lnv,
+ const GraphElem nedges,
  const GraphElem base,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
@@ -1502,23 +1505,23 @@ __global__
     
   __syncthreads();
 
-  for (GraphElem i = bid; i < lnv; i += step)
+  for (GraphElem i = bid; i < nedges; i += step)
   {
     if(tid == 0)
     {
-      const GraphElem id = 3*i;
-      range[0] = d_edge_mask[id+1];
-      range[1] = d_edge_mask[id+2];
-      range[2] = d_indices[d_edge_mask[id]+1];
+      const GraphElem id = 2*i;
+      range[0] = d_indices[d_edge_mask[id]];
+      range[1] = d_indices[d_edge_mask[id]+1];
+      range[2] = d_edge_mask[id+1];
     }
 
     __syncthreads();
 
     const GraphElem e0 = range[0];
     const GraphElem e1 = range[1];
-    const GraphElem last = range[2];
+    const GraphElem start = range[2];
    
-    for(GraphElem j = e0 + 1 + tid; j < last; j += blocksize)
+    for(GraphElem j = start + 1 + tid; j < nedges; j += blocksize)
     {
       const GraphElem edge_j = d_edge_list[j];
 

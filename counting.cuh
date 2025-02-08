@@ -354,10 +354,12 @@ __global__
  void local_count_gpu_masked3
 (
  const GraphElem nedges,
+ const GraphElem base,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
- GraphElem* __restrict__ d_local_count
+ GraphElem* __restrict__ d_local_count,
+ cudaStream_t stream
 );
 
 #if defined(USE_CUDA_CG)
@@ -366,6 +368,7 @@ __global__
  void local_count_gpu_masked3_kernel
 (
  const GraphElem nedges,
+ const GraphElem base,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
@@ -377,6 +380,7 @@ __global__
  void local_count_gpu_masked3_kernel
 (
  const GraphElem nedges,
+ const GraphElem base,
  const GraphElem* __restrict__ d_edge_mask,
  const GraphElem* __restrict__ d_indices,
  const GraphElem* __restrict__ d_edge_list,
