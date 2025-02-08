@@ -93,7 +93,7 @@ class TriangleCounting
     // store edge ranges
     const GraphElem base = g_->get_base(rank_);
 #if defined(SPLIT_LOCAL_COUNTING_KERNEL)
-    std::vector<GraphElem> edge_mask;
+    std::vector<std::array<GraphElem,3>> edge_mask;
 
     for (GraphElem i = 0; i < lnv; i++)
     {
@@ -114,9 +114,7 @@ class TriangleCounting
           GraphElem le0, le1;
           g_->edge_range(g_->global_to_local(etails[m]), le0, le1);
 
-          edge_mask.push_back(i);
-          edge_mask.push_back(m);
-          edge_mask.push_back(le1 - le0 + 1);
+          edge_mask.push_back(std::array<GraphElem, 3>{i, m, le1 - le0 + 1});
         }
       }
 
@@ -127,10 +125,8 @@ class TriangleCounting
       erange_[(i + base)*2+1] = edge_t.tail_;
     }
 
-    std::vector<GraphElem> idx(edge_mask.size()/3);
-    std::iota(idx.begin(), idx.end(), 0);
-    std::stable_sort(idx.begin(), idx.end(), 
-      [&edge_mask](GraphElem id1, GraphElem id2) { return edge_mask[id1*3+1] > edge_mask[id2*3+1]; });
+    std::sort(edge_mask.begin(), edge_mask.end(), 
+      [](auto a, auto b) { return a[2] > b[2]; });
 #else
     for (GraphElem i = 0; i < lnv; i++)
     {
@@ -344,10 +340,10 @@ class TriangleCounting
     
     // copy 50% of the largest local edges in terms 
     // of neighborhood size 
-    for (GraphElem i = 0; i < idx.size()/2; i++)
+    for (GraphElem i = 0; i < edge_mask.size()/2; i++)
     {
-      v_edge_mask.push_back(edge_mask[idx[i]*3]);
-      v_edge_mask.push_back(edge_mask[idx[i]*3+1]);
+      v_edge_mask.push_back(edge_mask[i][0]);
+      v_edge_mask.push_back(edge_mask[i][1]);
     }
     const GraphElem nedges = v_edge_mask.size()/2;
     CudaMalloc(d_edge_mask, nedges*2*sizeof(GraphElem));
@@ -364,15 +360,15 @@ class TriangleCounting
     nst++;
 
     // remaining GPU kernels
-    for (GraphElem i = idx.size()/2; i < idx.size(); i++)
+    for (GraphElem i = edge_mask.size()/2; i < edge_mask.size(); i++)
     {
       GraphElem e0, e1, jstart, jend;
-      g_->edge_range(edge_mask[idx[i]*3], e0, e1);
-      Edge const& edge_m = g_->get_edge(edge_mask[idx[i]*3+1]);
+      g_->edge_range(edge_mask[i][0], e0, e1);
+      Edge const& edge_m = g_->get_edge(edge_mask[i][1]);
 
       g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
 
-      local_count_gpu_inner(edge_mask[idx[i]*3+1]+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+      local_count_gpu_inner(edge_mask[i][1]+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
 
       nst++;
     }
@@ -417,7 +413,6 @@ class TriangleCounting
       cudaStreamDestroy(streams[t]);
     delete []streams;
 
-    idx.clear();
     v_edge_mask.clear();
     edge_mask.clear();
 #else
