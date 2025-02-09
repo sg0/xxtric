@@ -1436,7 +1436,7 @@ __global__
     if(warp_tid == 0)
     {
       const GraphElem id = 2*i;
-      t_range[0] = d_indices[d_edge_mask[id]+1];
+      t_range[0] = d_edge_mask[id];
       t_range[1] = d_edge_mask[id+1];
     }
 
@@ -1452,15 +1452,13 @@ __global__
 
     for(GraphElem j = m + 1 + warp_tid; j < e_end; j += WarpSize)
     {
-      const GraphElem edge_j = d_edge_list[j];
-
       for(GraphElem n = nstart; n < nend; n++)
       {
         const GraphElem edge_n = d_edge_list[n];
 
-        if (edge_n > edge_j)
+        if (edge_n > edge_m)
           break;
-        if (edge_n == edge_j)
+        if (edge_n == edge_m)
         {
           count++;
           break;
@@ -1501,7 +1499,7 @@ __global__
     if(tid == 0)
     {
       const GraphElem id = 2*i;
-      range[0] = d_indices[d_edge_mask[id]+1];
+      range[0] = d_edge_mask[id];
       range[1] = d_edge_mask[id+1];
     }
 
@@ -1516,15 +1514,13 @@ __global__
 
     for(GraphElem j = start + 1 + tid; j < e1; j += blocksize)
     {
-      const GraphElem edge_j = d_edge_list[j];
-
       for(GraphElem n = nstart; n < nend; n++)
       {
         const GraphElem edge_n = d_edge_list[n];
 
-        if (edge_n > edge_j)
+        if (edge_n > edge_m)
           break;
-        if (edge_n == edge_j)
+        if (edge_n == edge_m)
         {
           sdata[tid]++;
           break;

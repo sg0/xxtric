@@ -87,8 +87,7 @@ class TriangleCounting
     recv_count_  = new GraphElem[size_]();
     std::vector<GraphElem> etails(lne);
 
-    // TODO FIXME uncomment back after checking perf
-    //double t0 = MPI_Wtime();
+    double t0 = MPI_Wtime();
 
     // store edge ranges
     const GraphElem base = g_->get_base(rank_);
@@ -114,7 +113,7 @@ class TriangleCounting
           GraphElem le0, le1;
           g_->edge_range(g_->global_to_local(etails[m]), le0, le1);
 
-          edge_mask.push_back(std::array<GraphElem, 3>{i, m, le1 - le0 + 1});
+          edge_mask.push_back(std::array<GraphElem, 3>{e1, m, (le1-le0+1)});
         }
       }
 
@@ -154,9 +153,6 @@ class TriangleCounting
 
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
-
-    // TODO FIXME move back before this loop after checking perf
-    double t0 = MPI_Wtime();
     
     /// assume all tasks/node can see all GPUs in a node
     int deviceCount;
@@ -362,13 +358,11 @@ class TriangleCounting
     // remaining GPU kernels
     for (GraphElem i = edge_mask.size()/2; i < edge_mask.size(); i++)
     {
-      GraphElem e0, e1, jstart, jend;
-      g_->edge_range(edge_mask[i][0], e0, e1);
+      GraphElem jstart, jend;
       Edge const& edge_m = g_->get_edge(edge_mask[i][1]);
-
       g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
 
-      local_count_gpu_inner(edge_mask[i][1]+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+      local_count_gpu_inner(edge_mask[i][1]+1, edge_mask[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
 
       nst++;
     }
