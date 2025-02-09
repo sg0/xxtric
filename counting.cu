@@ -692,7 +692,6 @@ __global__
   volatile __shared__ GraphElem sdata[blocksize];
   GraphElem tid = threadIdx.x, bid = blockIdx.x, step = gridDim.x;
   sdata[tid] = 0;
-  const GraphElem edge_m = d_edge_list[start-1];
     
   __syncthreads();
   
@@ -1454,12 +1453,15 @@ __global__
       
       for(GraphElem j = jstart; j < jend; j++)
       {
+      /*
         if (d_edge_list[j] == edge_n)
           count++;
 
         if (__any_sync(__activemask(), d_edge_list[j] >= edge_n))
           break;
-      /*
+      */
+        const GraphElem edge_j = d_edge_list[j];
+        
         if (edge_j > edge_n)
           break;
         if (edge_j == edge_n)
@@ -1467,7 +1469,6 @@ __global__
           count++;
           break;
         }
-      */
       }
     }
   }

@@ -375,7 +375,6 @@ class TriangleCounting
       g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
 
       local_count_gpu_inner(edge_mask[i][1]+1, edge_mask[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
-
       nst++;
     }
     
