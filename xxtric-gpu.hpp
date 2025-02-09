@@ -91,42 +91,7 @@ class TriangleCounting
 
     // store edge ranges
     const GraphElem base = g_->get_base(rank_);
-#if defined(SPLIT_LOCAL_COUNTING_KERNEL)
-    std::vector<std::array<GraphElem,3>> edge_mask;
 
-    for (GraphElem i = 0; i < lnv; i++)
-    {
-      GraphElem e0, e1;
-      const GraphElem global_i = g_->local_to_global(i);
-      g_->edge_range(i, e0, e1);
-
-      if ((e0 + 1) == e1)
-        continue;
-
-      for (GraphElem m = e0; m < e1; m++)
-      {
-        Edge const& edge_m = g_->get_edge(m);
-        etails[m] = edge_m.tail_;
-
-        if (m != (e1-1) && global_i >= etails[m] && g_->get_owner(etails[m]) == rank_)
-        {
-          GraphElem le0, le1;
-          g_->edge_range(g_->global_to_local(etails[m]), le0, le1);
-
-          edge_mask.push_back(std::array<GraphElem, 3>{e1, m, (le1-le0+1)});
-        }
-      }
-
-      Edge const& edge_s = g_->get_edge(e0);
-      Edge const& edge_t = g_->get_edge(e1-1);
-
-      erange_[(i + base)*2] = edge_s.tail_;
-      erange_[(i + base)*2+1] = edge_t.tail_;
-    }
-
-    std::sort(edge_mask.begin(), edge_mask.end(), 
-      [](auto a, auto b) { return a[2] > b[2]; });
-#else
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1;
@@ -147,7 +112,6 @@ class TriangleCounting
       erange_[(i + base)*2] = edge_s.tail_;
       erange_[(i + base)*2+1] = edge_t.tail_;
     }
-#endif
     
     MPI_Barrier(comm_);
 
@@ -331,6 +295,54 @@ class TriangleCounting
     local_edge_range.clear();
     edge_range.clear();
 #elif defined(SPLIT_LOCAL_COUNTING_KERNEL)
+    std::vector<std::array<GraphElem,3>> edge_mask;
+    
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1, le0, le1, tup[2];
+      g_->edge_range(i, e0, e1);
+      const GraphElem global_i = g_->local_to_global(i);
+
+      if ((e0 + 1) == e1)
+        continue;
+
+      for (GraphElem m = e0; m < e1-1; m++)
+      {
+        Edge const& edge_m = g_->get_edge(m);
+        const int owner = g_->get_owner(edge_m.tail_);
+
+        if (global_i >= edge_m.tail_)
+          continue;
+
+        if (owner == rank_)
+        {
+          g_->edge_range(g_->global_to_local(edge_m.tail_), le0, le1);
+          edge_mask.push_back(std::array<GraphElem, 3>{e1, m, (le1-le0+1)});
+        }
+        else
+        {
+          if (owner > rank_)
+          {
+            for (GraphElem n = m + 1; n < e1; n++)
+            {
+              Edge const& edge_n = g_->get_edge(n);
+
+              if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+                break;
+              if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+                continue;
+
+              send_count[owner] += 2;
+              vcount_[i] += 1;
+            }
+          }
+        }
+      }
+    }
+ 
+    std::sort(edge_mask.begin(), edge_mask.end(), 
+      [](auto a, auto b) { return a[2] > b[2]; });   
+    
     GraphElem* d_edge_mask = nullptr;
     std::vector<GraphElem> v_edge_mask;
     
@@ -366,43 +378,7 @@ class TriangleCounting
 
       nst++;
     }
-
-    // remote
-    for (GraphElem i = 0; i < lnv; i++)
-    {
-      GraphElem e0, e1, tup[2];
-      g_->edge_range(i, e0, e1);
-      const GraphElem global_i = g_->local_to_global(i);
-
-      if ((e0 + 1) == e1)
-        continue;
-
-      for (GraphElem m = e0; m < e1-1; m++)
-      {
-        Edge const& edge_m = g_->get_edge(m);
-        const int owner = g_->get_owner(edge_m.tail_);
-
-        if (global_i >= edge_m.tail_)
-          continue;
-
-        if (owner > rank_)
-        {
-          for (GraphElem n = m + 1; n < e1; n++)
-          {
-            Edge const& edge_n = g_->get_edge(n);
-
-            if (!edge_within_max(edge_m.tail_, edge_n.tail_))
-              break;
-            if (!edge_above_min(edge_m.tail_, edge_n.tail_))
-              continue;
-
-            send_count[owner] += 2;
-            vcount_[i] += 1;
-          }
-        }
-      }
-    }
-
+    
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
       cudaStreamDestroy(streams[t]);
     delete []streams;
@@ -568,7 +544,7 @@ class TriangleCounting
 #else
     CudaFree(d_range);
 #endif
-#if defined(MASKED_LOCAL_COUNTING_KERNEL)
+#if defined(MASKED_LOCAL_COUNTING_KERNEL) || defined(SPLIT_LOCAL_COUNTING_KERNEL)
     CudaFree(d_edge_mask);
 #endif
   }

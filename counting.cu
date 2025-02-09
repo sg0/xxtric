@@ -634,7 +634,7 @@ __global__
   
   const GraphElem bid = blockIdx.x, step = gridDim.x;
   const int WarpSize = tilesize, BlockSize = blocksize;
-  __shared__ GraphElem range[(BlockSize/WarpSize)*2];
+  GraphElem count = 0;
 
   cg::thread_block block = cg::this_thread_block();
   cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
@@ -642,8 +642,6 @@ __global__
   const GraphElem block_tid = block.thread_rank();
   const GraphElem warp_tid = warp.thread_rank();
 
-  GraphElem* t_range = &range[(block_tid/WarpSize)*2];
-  GraphElem count = 0;
   const GraphElem b0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
     
   warp.sync();
@@ -1447,22 +1445,29 @@ __global__
     
     const GraphElem edge_m = d_edge_list[m];
     const GraphElem base_edge_m = edge_m-base;
-    const GraphElem nstart = d_indices[base_edge_m];
-    const GraphElem nend = d_indices[base_edge_m+1];
+    const GraphElem jstart = d_indices[base_edge_m];
+    const GraphElem jend = d_indices[base_edge_m+1];
 
-    for(GraphElem j = m + 1 + warp_tid; j < e_end; j += WarpSize)
+    for(GraphElem n = m + 1 + warp_tid; n < e_end; n += WarpSize)
     {
-      for(GraphElem n = nstart; n < nend; n++)
+      const GraphElem edge_n = d_edge_list[n];
+      
+      for(GraphElem j = jstart; j < jend; j++)
       {
-        const GraphElem edge_n = d_edge_list[n];
+        if (d_edge_list[j] == edge_n)
+          count++;
 
-        if (edge_n > edge_m)
+        if (__any_sync(__activemask(), d_edge_list[j] >= edge_n))
           break;
-        if (edge_n == edge_m)
+      /*
+        if (edge_j > edge_n)
+          break;
+        if (edge_j == edge_n)
         {
           count++;
           break;
         }
+      */
       }
     }
   }
@@ -1509,18 +1514,20 @@ __global__
     const GraphElem start = range[1];
     const GraphElem edge_m = d_edge_list[start];
     const GraphElem base_edge_m = edge_m-base;
-    const GraphElem nstart = d_indices[base_edge_m];
-    const GraphElem nend = d_indices[base_edge_m+1];
+    const GraphElem jstart = d_indices[base_edge_m];
+    const GraphElem jend = d_indices[base_edge_m+1];
 
-    for(GraphElem j = start + 1 + tid; j < e1; j += blocksize)
+    for(GraphElem n = start + 1 + tid; n < e1; n += blocksize)
     {
-      for(GraphElem n = nstart; n < nend; n++)
+      const GraphElem edge_n = d_edge_list[n];
+      
+      for(GraphElem j = jstart; j < jend; j++)
       {
-        const GraphElem edge_n = d_edge_list[n];
+        const GraphElem edge_j = d_edge_list[j];
 
-        if (edge_n > edge_m)
+        if (edge_j > edge_n)
           break;
-        if (edge_n == edge_m)
+        if (edge_j == edge_n)
         {
           sdata[tid]++;
           break;
