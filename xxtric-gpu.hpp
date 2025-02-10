@@ -299,7 +299,7 @@ class TriangleCounting
     
     for (GraphElem i = 0; i < lnv; i++)
     {
-      GraphElem e0, e1, le0, le1, tup[2];
+      GraphElem e0, e1, tup[2];
       g_->edge_range(i, e0, e1);
       const GraphElem global_i = g_->local_to_global(i);
 
@@ -315,10 +315,7 @@ class TriangleCounting
           continue;
 
         if (owner == rank_)
-        {
-          g_->edge_range(g_->global_to_local(edge_m.tail_), le0, le1);
-          edge_mask.push_back(std::array<GraphElem, 3>{e1, m, (le1-le0+1)});
-        }
+          edge_mask.push_back(std::array<GraphElem, 3>{e1, m, (e1-e0+1)});
         else
         {
           if (owner > rank_)
@@ -346,9 +343,9 @@ class TriangleCounting
     GraphElem* d_edge_mask = nullptr;
     std::vector<GraphElem> v_edge_mask;
     
-    // copy 50% of the largest local edges in terms 
+    // copy 50% of the smallest local edges in terms 
     // of neighborhood size 
-    for (GraphElem i = 0; i < edge_mask.size()/2; i++)
+    for (GraphElem i = edge_mask.size()/2; i < edge_mask.size(); i++)
     {
       v_edge_mask.push_back(edge_mask[i][0]);
       v_edge_mask.push_back(edge_mask[i][1]);
@@ -368,7 +365,7 @@ class TriangleCounting
     nst++;
 
     // remaining GPU kernels
-    for (GraphElem i = edge_mask.size()/2; i < edge_mask.size(); i++)
+    for (GraphElem i = 0; i < edge_mask.size()/2; i++)
     {
       GraphElem jstart, jend;
       Edge const& edge_m = g_->get_edge(edge_mask[i][1]);
