@@ -299,7 +299,7 @@ class TriangleCounting
     
     for (GraphElem i = 0; i < lnv; i++)
     {
-      GraphElem e0, e1, tup[2];
+      GraphElem e0, e1, le0, le1, tup[2];
       g_->edge_range(i, e0, e1);
       const GraphElem global_i = g_->local_to_global(i);
 
@@ -315,7 +315,10 @@ class TriangleCounting
           continue;
 
         if (owner == rank_)
-          edge_mask.push_back(std::array<GraphElem, 3>{e1, m, (e1-e0+1)});
+        {
+          g_->edge_range(g_->global_to_local(edge_m.tail_), le0, le1);
+          edge_mask.push_back(std::array<GraphElem, 3>{e1, m, (le1-le0+1)});
+        }
         else
         {
           if (owner > rank_)
@@ -336,16 +339,23 @@ class TriangleCounting
         }
       }
     }
- 
-    std::sort(edge_mask.begin(), edge_mask.end(), 
-      [](auto a, auto b) { return a[2] > b[2]; });   
+    
+    /// manage streams
+    GraphElem nst = 0;
+    cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
+    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
+      cudaStreamCreate(&streams[t]);
     
     GraphElem* d_edge_mask = nullptr;
     std::vector<GraphElem> v_edge_mask;
-    
+
+#if defined(SORT_BY_NUM_EDGES)
+    std::sort(edge_mask.begin(), edge_mask.end(), 
+      [](auto a, auto b) { return a[2] > b[2]; });   
+   
     // copy 50% of the smallest local edges in terms 
     // of neighborhood size 
-    for (GraphElem i = edge_mask.size()/2; i < edge_mask.size(); i++)
+    for (GraphElem i = 0; i < edge_mask.size()/2; i++)
     {
       v_edge_mask.push_back(edge_mask[i][0]);
       v_edge_mask.push_back(edge_mask[i][1]);
@@ -354,18 +364,12 @@ class TriangleCounting
     CudaMalloc(d_edge_mask, nedges*2*sizeof(GraphElem));
     CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*2*sizeof(GraphElem));
     
-    /// manage streams
-    GraphElem nst = 0;
-    cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
-    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
-      cudaStreamCreate(&streams[t]);
-
     // bulk GPU kernel
     local_count_gpu_masked3(nedges, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[0]);
     nst++;
 
     // remaining GPU kernels
-    for (GraphElem i = 0; i < edge_mask.size()/2; i++)
+    for (GraphElem i = edge_mask.size()/2; i < edge_mask.size(); i++)
     {
       GraphElem jstart, jend;
       Edge const& edge_m = g_->get_edge(edge_mask[i][1]);
@@ -374,6 +378,32 @@ class TriangleCounting
       local_count_gpu_inner(edge_mask[i][1]+1, edge_mask[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
       nst++;
     }
+#else
+    for (GraphElem i = 0; i < edge_mask.size(); i++)
+    {
+      if ((edge_mask[i][0]-edge_mask[i][1]+1) < edge_mask[i][2]) // e1-m < #nbrs(m)
+      {
+        v_edge_mask.push_back(edge_mask[i][0]);
+        v_edge_mask.push_back(edge_mask[i][1]);
+      }
+      else // grid-block over edge-list
+      {
+        GraphElem jstart, jend;
+        Edge const& edge_m = g_->get_edge(edge_mask[i][1]);
+        g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
+
+        local_count_gpu_inner(edge_mask[i][1]+1, edge_mask[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+        nst++;
+      }
+    }
+
+    const GraphElem nedges = v_edge_mask.size()/2;
+    CudaMalloc(d_edge_mask, nedges*2*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*2*sizeof(GraphElem));
+    
+    // grid-block over vertices
+    local_count_gpu_masked3(nedges, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[nst % MAX_CUDA_STREAMS]);
+#endif
     
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
       cudaStreamDestroy(streams[t]);
