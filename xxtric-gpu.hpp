@@ -381,7 +381,7 @@ class TriangleCounting
 #else
     for (GraphElem i = 0; i < edge_mask.size(); i++)
     {
-      if ((edge_mask[i][0]-edge_mask[i][1]+1) > edge_mask[i][2]) // e1-m > #nbrs(m)
+      if ((edge_mask[i][0]-edge_mask[i][1]+1) < edge_mask[i][2]) // e1-m < #nbrs(m)
       {
         v_edge_mask.push_back(edge_mask[i][0]);
         v_edge_mask.push_back(edge_mask[i][1]);
