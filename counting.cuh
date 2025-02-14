@@ -46,6 +46,10 @@ inline void CudaAssert(cudaError_t code, const char *file, int line, bool abort=
 {\
     CudaCall(cudaMallocHost((void**)&ptr, size)); \
 }
+#define CudaMallocManaged(ptr, size)\
+{\
+    CudaCall(cudaMallocManaged((void**)&ptr, size)); \
+}
 #define CudaStreamCreate(stream) \
 {\
    CudaCall(cudaStreamCreate((cudaStream_t*)&stream));\

@@ -37,9 +37,8 @@
 //
 // ************************************************************************ 
 #pragma once
-#ifndef XXTRIC_HPP
-#define XXTRIC_HPP
-
+#ifndef XXTRIC_GPU_HPP
+#define XXTRIC_GPU_HPP
 
 #include <numeric>
 #include <utility>
@@ -63,13 +62,17 @@ class TriangleCounting
   public:
 
     TriangleCounting(Graph* g, const GraphElem bufsize): 
-      g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), 
-      pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
+      g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), pdegree_(0), 
+      sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
       recv_count_(nullptr), rindex_(0), rdegree_(0), d_eind_(nullptr), d_elst_(nullptr), 
       d_rbuf_(nullptr), d_ntriangles_(nullptr)
-#if defined(USE_ASYNC_STREAMS_AT_RECV)
+#if defined(USE_CUDA_AWARE_MPI)
+#else
+      , rbuf_(nullptr)
+#endif
+#if defined(USE_ASYNC_STREAMS_AT_RECV) && !defined(USE_CUDA_AWARE_MPI)
       , e_rstreams_(nullptr), count_rstreams_(0)
 #endif
   {
@@ -525,32 +528,36 @@ class TriangleCounting
 
     if (rank_ == 0)
       std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
- 
+
+#if defined(USE_CUDA_AWARE_MPI) 
+    CudaMallocManaged(sbuf_, pdegree_*bufsize_*sizeof(GraphElem));
+#else
     sbuf_     = new GraphElem[pdegree_*bufsize_];
+#endif
+
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
     sreq_     = new MPI_Request[pdegree_];
     stat_     = new char[pdegree_];
-    
-    rbuf_     = new GraphElem[rdegree_*bufsize_];
     rreq_     = new MPI_Request[rdegree_];
 
-    
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
     std::fill(prev_m_, prev_m_ + pdegree_, -1);
     std::fill(stat_, stat_ + pdegree_, '0');
-    
     std::fill(rreq_, rreq_ + rdegree_, MPI_REQUEST_NULL);
 
-#if defined(USE_ASYNC_STREAMS_AT_RECV)
+#if defined(USE_ASYNC_STREAMS_AT_RECV) && !defined(USE_CUDA_AWARE_MPI)
     count_rstreams_ = MIN(MAX_CUDA_STREAMS, rdegree_);
     e_rstreams_ = new cudaStream_t[count_rstreams_];
     for (int t = 0; t < count_rstreams_; t++)
       cudaStreamCreate(&e_rstreams_[t]);
     CudaMalloc(d_rbuf_, count_rstreams_*bufsize_*sizeof(GraphElem));
+#elif defined(USE_CUDA_AWARE_MPI)
+    CudaMalloc(d_rbuf_, rdegree_*bufsize_*sizeof(GraphElem));
 #else
+    rbuf_     = new GraphElem[rdegree_*bufsize_];
     CudaMalloc(d_rbuf_, bufsize_*sizeof(GraphElem));
 #endif
 
@@ -579,8 +586,12 @@ class TriangleCounting
 
     void clear()
     {
+#if defined(USE_CUDA_AWARE_MPI)
+      CudaFree(sbuf_);
+#else
       delete []sbuf_;
       delete []rbuf_;
+#endif
       delete []recv_count_;
       delete []sbuf_ctr_;
       delete []sreq_;
@@ -596,7 +607,7 @@ class TriangleCounting
       CudaFree(d_rbuf_);
       CudaFree(d_ntriangles_);
 
-#if defined(USE_ASYNC_STREAMS_AT_RECV)
+#if defined(USE_ASYNC_STREAMS_AT_RECV) && !defined(USE_CUDA_AWARE_MPI)
       delete []e_rstreams_;
 #endif
       pindex_.clear();
@@ -628,8 +639,13 @@ class TriangleCounting
     {
         if (recv_count_[source] > 0)
         {
+#if defined(USE_CUDA_AWARE_MPI)
+          MPI_Irecv(&d_rbuf_[rindex_[source]*bufsize_], bufsize_, 
+              MPI_GRAPH_TYPE, source, TAG_DATA, comm_, &rreq_[rindex_[source]]);
+#else
           MPI_Irecv(&rbuf_[rindex_[source]*bufsize_], bufsize_, 
               MPI_GRAPH_TYPE, source, TAG_DATA, comm_, &rreq_[rindex_[source]]);
+#endif
         }
     }
 
@@ -760,7 +776,7 @@ class TriangleCounting
         return;
 
       GraphElem base = g_->get_base(rank_);
-#if defined(USE_ASYNC_STREAMS_AT_RECV)
+#if defined(USE_ASYNC_STREAMS_AT_RECV) && !defined(USE_CUDA_AWARE_MPI)
       GraphElem nst = 0;
 #endif
 
@@ -782,11 +798,13 @@ class TriangleCounting
 
           if (source != MPI_ANY_SOURCE)
           {
-#if defined(USE_ASYNC_STREAMS_AT_RECV)
+#if defined(USE_ASYNC_STREAMS_AT_RECV) && !defined(USE_CUDA_AWARE_MPI)
             const int s_idx = nst % count_rstreams_;
             CudaMemcpyAsyncHtoD(&d_rbuf_[s_idx*bufsize_], &rbuf_[p*bufsize_], count*sizeof(GraphElem), e_rstreams_[s_idx]);
             local_count_gpu_recv(count, base, &d_rbuf_[s_idx*bufsize_], d_eind_, d_elst_, d_ntriangles_, e_rstreams_[s_idx]);
             nst++;
+#elif defined(USE_CUDA_AWARE_MPI)
+            local_count_gpu_recv(count, base, &d_rbuf_[p*bufsize_], d_eind_, d_elst_, d_ntriangles_);
 #else
             CudaMemcpyHtoD(d_rbuf_, &rbuf_[p*bufsize_], count*sizeof(GraphElem));
             local_count_gpu_recv(count, base, d_rbuf_, d_eind_, d_elst_, d_ntriangles_);
@@ -865,7 +883,7 @@ class TriangleCounting
 #endif
       }
    
-#if defined(USE_ASYNC_STREAMS_AT_RECV)
+#if defined(USE_ASYNC_STREAMS_AT_RECV) && !defined(USE_CUDA_AWARE_MPI)
       for (int t = 0; t < count_rstreams_; t++)
         cudaStreamDestroy(e_rstreams_[t]);
 #endif
@@ -886,13 +904,18 @@ class TriangleCounting
     Graph* g_;
 
     GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_;
-    GraphElem *sbuf_, *rbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
+    GraphElem *sbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
+
+#if defined(USE_CUDA_AWARE_MPI)
+#else
+    GraphElem *rbuf_;
+#endif
 
     GraphElem *d_eind_, *d_elst_, *d_rbuf_, *d_ntriangles_; // device
     
     MPI_Request *sreq_, *rreq_;
     char *stat_;
-#if defined(USE_ASYNC_STREAMS_AT_RECV)
+#if defined(USE_ASYNC_STREAMS_AT_RECV) && !defined(USE_CUDA_AWARE_MPI)
     cudaStream_t* e_rstreams_;
     int count_rstreams_;
 #endif   
