@@ -69,6 +69,7 @@ class TriangleCounting
       recv_count_(nullptr), rindex_(0), rdegree_(0), d_eind_(nullptr), d_elst_(nullptr), 
       d_rbuf_(nullptr), d_ntriangles_(nullptr)
 #if defined(USE_CUDA_AWARE_MPI)
+      , d_sbuf_(nullptr)
 #else
       , rbuf_(nullptr)
 #endif
@@ -530,7 +531,8 @@ class TriangleCounting
       std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
 
 #if defined(USE_CUDA_AWARE_MPI) 
-    CudaMallocManaged(sbuf_, pdegree_*bufsize_*sizeof(GraphElem));
+    CudaMallocHost(sbuf_, pdegree_*bufsize_*sizeof(GraphElem));
+    CudaMalloc(d_sbuf_, pdegree_*bufsize_*sizeof(GraphElem));
 #else
     sbuf_     = new GraphElem[pdegree_*bufsize_];
 #endif
@@ -588,6 +590,7 @@ class TriangleCounting
     {
 #if defined(USE_CUDA_AWARE_MPI)
       CudaFree(sbuf_);
+      CudaFree(d_sbuf_);
 #else
       delete []sbuf_;
       delete []rbuf_;
@@ -620,8 +623,14 @@ class TriangleCounting
     {
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
+#if defined(USE_CUDA_AWARE_MPI)
+        CudaMemcpyHtoD(&d_sbuf_[pindex_[owner]*bufsize_], &sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]]*sizeof(GraphElem));
+        MPI_Isend(&d_sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
+            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+#else
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+#endif
         stat_[pindex_[owner]] = '1'; 
       }
     }
@@ -907,6 +916,7 @@ class TriangleCounting
     GraphElem *sbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
 
 #if defined(USE_CUDA_AWARE_MPI)
+    GraphElem *d_sbuf_;
 #else
     GraphElem *rbuf_;
 #endif
