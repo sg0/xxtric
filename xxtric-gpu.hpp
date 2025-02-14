@@ -530,13 +530,6 @@ class TriangleCounting
     if (rank_ == 0)
       std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
 
-#if defined(USE_CUDA_AWARE_MPI) 
-    CudaMallocHost(sbuf_, pdegree_*bufsize_*sizeof(GraphElem));
-    CudaMalloc(d_sbuf_, pdegree_*bufsize_*sizeof(GraphElem));
-#else
-    sbuf_     = new GraphElem[pdegree_*bufsize_];
-#endif
-
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
@@ -557,8 +550,11 @@ class TriangleCounting
       cudaStreamCreate(&e_rstreams_[t]);
     CudaMalloc(d_rbuf_, count_rstreams_*bufsize_*sizeof(GraphElem));
 #elif defined(USE_CUDA_AWARE_MPI)
+    CudaMallocHost(sbuf_, pdegree_*bufsize_*sizeof(GraphElem));
+    CudaMalloc(d_sbuf_, pdegree_*bufsize_*sizeof(GraphElem));
     CudaMalloc(d_rbuf_, rdegree_*bufsize_*sizeof(GraphElem));
 #else
+    sbuf_     = new GraphElem[pdegree_*bufsize_];
     rbuf_     = new GraphElem[rdegree_*bufsize_];
     CudaMalloc(d_rbuf_, bufsize_*sizeof(GraphElem));
 #endif
@@ -625,6 +621,7 @@ class TriangleCounting
       {
 #if defined(USE_CUDA_AWARE_MPI)
         CudaMemcpyHtoD(&d_sbuf_[pindex_[owner]*bufsize_], &sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]]*sizeof(GraphElem));
+        CudaDeviceSynchronize();
         MPI_Isend(&d_sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
 #else
