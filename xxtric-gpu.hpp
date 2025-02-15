@@ -621,7 +621,8 @@ class TriangleCounting
       {
 #if defined(USE_CUDA_AWARE_MPI)
         CudaMemcpyHtoD(&d_sbuf_[pindex_[owner]*bufsize_], &sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]]*sizeof(GraphElem));
-        CudaDeviceSynchronize();
+        // CudaDeviceSynchronize(); -- not needed if sbuf_ is pinned
+        // https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html#api-sync-behavior
         MPI_Isend(&d_sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
 #else
@@ -810,6 +811,7 @@ class TriangleCounting
             local_count_gpu_recv(count, base, &d_rbuf_[s_idx*bufsize_], d_eind_, d_elst_, d_ntriangles_, e_rstreams_[s_idx]);
             nst++;
 #elif defined(USE_CUDA_AWARE_MPI)
+            CudaDeviceSynchronize();
             local_count_gpu_recv(count, base, &d_rbuf_[p*bufsize_], d_eind_, d_elst_, d_ntriangles_);
 #else
             CudaMemcpyHtoD(d_rbuf_, &rbuf_[p*bufsize_], count*sizeof(GraphElem));
