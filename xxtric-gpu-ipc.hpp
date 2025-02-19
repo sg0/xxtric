@@ -60,10 +60,11 @@ class TriangleCounting
     TriangleCounting(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), erange_(nullptr), 
       vcount_(nullptr), ntriangles_(0), nghosts_(0), out_nghosts_(0), 
-      in_nghosts_(0), prev_m_(nullptr),  stat_(nullptr), prev_k_(nullptr), 
-      bufsize_(0), recv_count_(nullptr), d_counts_(nullptr), d_eind_(nullptr), 
-      d_elst_(nullptr), d_rbuf_handles_(nullptr), d_counts_handles_(nullptr), 
-      d_rbuf_(nullptr), d_ntriangles_(nullptr) 
+      in_nghosts_(0), pdegree_(0), rdegree_(0), pindex_(0), rindex_(0), 
+      targets_(0), sources_(0), prev_m_(nullptr), stat_(nullptr), 
+      prev_k_(nullptr), bufsize_(0), recv_count_(nullptr), d_counts_(nullptr), 
+      d_eind_(nullptr), d_elst_(nullptr), d_rbuf_handles_(nullptr), 
+      d_counts_handles_(nullptr), d_rbuf_(nullptr), d_ntriangles_(nullptr) 
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -275,7 +276,22 @@ class TriangleCounting
     {
       out_nghosts_ += send_count[p];
       in_nghosts_ += recv_count_[p];
+
+      if (send_count[p] > 0)
+        targets_.push_back(p);
+
+      if (recv_count_[p] > 0)
+        sources_.push_back(p);
     }
+      
+    pdegree_ = targets_.size();
+    rdegree_ = sources_.size();
+
+    for (int i = 0; i < pdegree_; i++)
+      pindex_.insert({targets_[i], i});
+
+    for (int i = 0; i < rdegree_; i++)
+      rindex_.insert({sources_[i], i});
       
     nghosts_ = out_nghosts_ + in_nghosts_;
     bufsize_ = (nghosts_ < bufsize) ? nghosts_ : bufsize;
@@ -285,32 +301,31 @@ class TriangleCounting
     if (rank_ == 0)
       std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
  
-    sbuf_ctr_ = new GraphElem[size_]();
-    prev_k_   = new GraphElem[size_];
-    prev_m_   = new GraphElem[size_];
-    stat_     = new char[size_];
+    sbuf_ctr_ = new GraphElem[pdegree_]();
+    prev_k_   = new GraphElem[pdegree_];
+    prev_m_   = new GraphElem[pdegree_];
+    stat_     = new char[pdegree_];
 
-    std::fill(prev_k_, prev_k_ + size_, -1);
-    std::fill(prev_m_, prev_m_ + size_, -1);
-    std::fill(stat_, stat_ + size_, '0');
+    std::fill(prev_k_, prev_k_ + pdegree_, -1);
+    std::fill(prev_m_, prev_m_ + pdegree_, -1);
+    std::fill(stat_, stat_ + pdegree_, '0');
 
+    CudaMallocHost(sbuf_, pdegree_*bufsize_*sizeof(GraphElem));
     CudaMallocHost(d_counts_, size_*sizeof(GraphElem));
-    CudaMallocHost(sbuf_, size_*bufsize_*sizeof(GraphElem));
     CudaMalloc(d_rbuf_, size_*bufsize_*sizeof(GraphElem));
     
     CudaMemset(d_counts_, 0, size_*sizeof(GraphElem));
     
     d_counts_handles_ = new cudaIpcMemHandle_t[size_];
     d_rbuf_handles_ = new cudaIpcMemHandle_t[size_];
-    
-    for (int i = 0; i < size_; i++)
-    {
-      if (i != rank_)
-      {
-        CudaIPCGetMemHandle(&d_counts_[i], d_counts_handles_[i]);
-        CudaIPCGetMemHandle(&d_rbuf_[i*bufsize_], d_rbuf_handles_[i]);
-      }
-    }
+
+    CudaIPCGetMemHandle(&d_counts_[rank_], d_counts_handles_[rank_]);
+    CudaIPCGetMemHandle(&d_rbuf_[rank_*bufsize_], d_rbuf_handles_[rank_]);
+
+    MPI_Allgather(&d_counts_handles_[rank_], sizeof(cudaIpcMemHandle_t), MPI_BYTE, 
+        d_counts_handles_, sizeof(cudaIpcMemHandle_t), MPI_BYTE, comm_);
+    MPI_Allgather(&d_rbuf_handles_[rank_], sizeof(cudaIpcMemHandle_t), MPI_BYTE, 
+        d_rbuf_handles_, sizeof(cudaIpcMemHandle_t), MPI_BYTE, comm_);
 
     MPI_Barrier(comm_);
 
@@ -342,6 +357,11 @@ class TriangleCounting
 
       delete []d_rbuf_handles_;
       delete []d_counts_handles_;
+            
+      pindex_.clear();
+      targets_.clear();
+      rindex_.clear();
+      sources_.clear();
       
       CudaFree(sbuf_);
       CudaFree(d_counts_);
@@ -351,37 +371,20 @@ class TriangleCounting
       CudaFree(d_ntriangles_);
     }
 
-    inline void begin_access()
-    {
-      for (int i = 0; i < size_; i++)
-      {
-        if (i != rank_)
-        {
-          CudaIPCOpenMemHandle(d_counts_[i], d_counts_handles_[i]);
-          CudaIPCOpenMemHandle(d_rbuf_[i*bufsize_], d_rbuf_handles_[i]);
-
-        }
-      }
-    }
-
-    inline void end_access()
-    {
-      for (int i = 0; i < size_; i++)
-      {
-        if (i != rank_)
-        {
-          CudaIPCCloseMemHandle(d_counts_handles_[i]);
-          CudaIPCCloseMemHandle(d_rbuf_handles_[i]);
-        }
-      }
-    }
-
     inline void push(int owner)
     {
       if (stat_[owner] == '0' && sbuf_ctr_[owner] > 0)
       {
-        CudaMemcpyHtoD(&d_counts_[owner], &sbuf_ctr_[owner], sizeof(GraphElem));
-        CudaMemcpyHtoD(&d_rbuf_[owner*bufsize_], &sbuf_[owner*bufsize_], sbuf_ctr_[owner]*sizeof(GraphElem));
+        GraphElem *dest_buf_data, *dest_buf_count;
+        CudaIPCOpenMemHandle(dest_buf_count, d_counts_handles_[owner]);
+        CudaIPCOpenMemHandle(dest_buf_data, d_rbuf_handles_[owner]);
+
+        CudaMemcpyUVA(dest_buf_count, &sbuf_ctr_[owner], sizeof(GraphElem));
+        CudaMemcpyUVA(dest_buf_data, &sbuf_[owner*bufsize_], sbuf_ctr_[owner]*sizeof(GraphElem));
+        
+        CudaIPCCloseMemHandle(dest_buf_count);
+        CudaIPCCloseMemHandle(dest_buf_data);
+
         stat_[owner] = '1'; 
       }
     }
@@ -391,9 +394,8 @@ class TriangleCounting
 #if defined(USE_OPENMP)
 #pragma omp parallel for default(shared)
 #endif
-      for (int p = 0; p < size_; p++)
-        if (p != rank_)
-          push(p);
+      for (int p = 0; p < pdegree_; p++)
+          push(targets_[p]);
     }
 
     inline void lookup_edges()
@@ -420,7 +422,7 @@ class TriangleCounting
           if (global_i >= edge.edge_->tail_)
               continue;
 
-          const GraphElem pidx = owner;
+          const GraphElem pidx = pindex_[owner];
           const GraphElem disp = pidx*bufsize_;
 
           if (edge.active_ && owner > rank_)
@@ -515,17 +517,18 @@ class TriangleCounting
 #if defined(USE_OPENMP)
 #pragma omp parallel for default(shared) reduction(-:in_nghosts_)
 #endif
-      for (GraphElem p = 0; p < size_; p++)
+      for (GraphElem p = 0; p < rdegree_; p++)
       {
-        if (p != rank_)
+        const GraphElem source = sources_[p];
+        const GraphElem count = d_counts_[source];
+        if (count > 0)
         {
-          const GraphElem count = d_counts_[p];
-          if (count > 0)
-          {
-            local_count_gpu_recv(count, base, &d_rbuf_[p*bufsize_], d_eind_, d_elst_, d_ntriangles_);
-            CudaMemset(&d_rbuf_[p*bufsize_], 0, count*sizeof(GraphElem));
-            in_nghosts_ -= count;
-          }
+          local_count_gpu_recv(count, base, &d_rbuf_[source*bufsize_], d_eind_, d_elst_, d_ntriangles_);
+          
+          CudaMemset(&d_rbuf_[source*bufsize_], 0, count*sizeof(GraphElem));
+          d_counts_[source] = 0;
+
+          in_nghosts_ -= count;
         }
       }
     }
@@ -547,18 +550,14 @@ class TriangleCounting
       {
         pop();
 
-        begin_access();
-
         if (out_nghosts_ == 0)
           push();
         else
           lookup_edges();
         
-        end_access();
-        
-        for (int i = 0; i < size_; i++)
+        for (int i = 0; i < pdegree_; i++)
         {
-          if (i != rank_)
+          if (stat_[i] == '1')
           {
             sbuf_ctr_[i] = 0;
             stat_[i] = '0';
@@ -604,7 +603,7 @@ class TriangleCounting
   private:
     Graph* g_;
 
-    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_;
+    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_;
     GraphElem *sbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
 
     GraphElem *d_eind_, *d_elst_, *d_rbuf_, *d_counts_, *d_ntriangles_; // device
@@ -612,7 +611,9 @@ class TriangleCounting
 
     char *stat_;
     int rank_, size_;
-    
+    std::vector<int> targets_, sources_;
+    std::unordered_map<int, int> pindex_, rindex_; 
+ 
     MPI_Comm comm_;
 };
 #endif

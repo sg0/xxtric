@@ -930,8 +930,8 @@ class TriangleCounting
     cudaStream_t* e_rstreams_;
     int count_rstreams_;
 #endif   
-    std::vector<int> targets_, sources_;
     int rank_, size_;
+    std::vector<int> targets_, sources_;
     std::unordered_map<int, int> pindex_, rindex_; 
     
     MPI_Comm comm_;
