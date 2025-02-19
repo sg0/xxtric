@@ -309,9 +309,6 @@ class TriangleCounting
       {
         CudaIPCGetMemHandle(&d_counts_[i], d_counts_handles_[i]);
         CudaIPCGetMemHandle(&d_rbuf_[i*bufsize_], d_rbuf_handles_[i]);
-         
-        CudaIPCOpenMemHandle(d_counts_[i], d_counts_handles_[i]);
-        CudaIPCOpenMemHandle(d_rbuf_[i*bufsize_], d_rbuf_handles_[i]);
       }
     }
 
@@ -342,15 +339,6 @@ class TriangleCounting
       delete []stat_;
       delete []vcount_;
       delete []erange_;
-    
-      for (int i = 0; i < size_; i++)
-      {
-        if (i != rank_)
-        {
-          CudaIPCCloseMemHandle(d_rbuf_handles_[i]);
-          CudaIPCCloseMemHandle(d_counts_handles_[i]);
-        }
-      }
 
       delete []d_rbuf_handles_;
       delete []d_counts_handles_;
@@ -361,6 +349,31 @@ class TriangleCounting
       CudaFree(d_eind_);
       CudaFree(d_elst_);
       CudaFree(d_ntriangles_);
+    }
+
+    inline void begin_access()
+    {
+      for (int i = 0; i < size_; i++)
+      {
+        if (i != rank_)
+        {
+          CudaIPCOpenMemHandle(d_counts_[i], d_counts_handles_[i]);
+          CudaIPCOpenMemHandle(d_rbuf_[i*bufsize_], d_rbuf_handles_[i]);
+
+        }
+      }
+    }
+
+    inline void end_access()
+    {
+      for (int i = 0; i < size_; i++)
+      {
+        if (i != rank_)
+        {
+          CudaIPCCloseMemHandle(d_counts_handles_[i]);
+          CudaIPCCloseMemHandle(d_rbuf_handles_[i]);
+        }
+      }
     }
 
     inline void push(int owner)
@@ -534,10 +547,14 @@ class TriangleCounting
       {
         pop();
 
+        begin_access();
+
         if (out_nghosts_ == 0)
           push();
         else
           lookup_edges();
+        
+        end_access();
         
         for (int i = 0; i < size_; i++)
         {
