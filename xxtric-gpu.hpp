@@ -544,6 +544,8 @@ class TriangleCounting
     std::fill(rreq_, rreq_ + rdegree_, MPI_REQUEST_NULL);
 
 #if defined(USE_ASYNC_STREAMS_AT_RECV) && !defined(USE_CUDA_AWARE_MPI)
+    sbuf_     = new GraphElem[pdegree_*bufsize_];
+    rbuf_     = new GraphElem[rdegree_*bufsize_];
     count_rstreams_ = MIN(MAX_CUDA_STREAMS, rdegree_);
     e_rstreams_ = new cudaStream_t[count_rstreams_];
     for (int t = 0; t < count_rstreams_; t++)

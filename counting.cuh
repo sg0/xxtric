@@ -50,9 +50,20 @@ inline void CudaAssert(cudaError_t code, const char *file, int line, bool abort=
 {\
     CudaCall(cudaMallocManaged((void**)&ptr, size)); \
 }
+
 #define CudaStreamCreate(stream) \
 {\
    CudaCall(cudaStreamCreate((cudaStream_t*)&stream));\
+}
+
+#define CudaStreamCreateNB(stream) \
+{\
+   CudaCall(cudaStreamCreateWithFlags((cudaStream_t*)&stream), cudaStreamNonBlocking);\
+}
+
+#define CudaStreamDestroy(stream) \
+{\
+   CudaCall(cudaStreamDestroy(stream));\
 }
 
 #define CudaMemcpyUVA(dest, src, size)\
@@ -106,12 +117,12 @@ CudaCall(cudaDeviceSynchronize())
    CudaCall(cudaMemset(src, val, size));\
 }
 
-#define CudaHostRegister(ptr, size, flag)\
+#define CudaHostRegister(ptr, size, flag) \
 {\
-    CudaCall(cudaHostRegister(ptr, size, flag)); \
+    CudaCall(cudaHostRegister(ptr, size, flag));\
 }
 
-#define CudaHostUnregister(ptr)\
+#define CudaHostUnregister(ptr) \
 {\
     CudaCall(cudaHostUnregister(ptr));\
 }
@@ -119,6 +130,21 @@ CudaCall(cudaDeviceSynchronize())
 #define CudaSetDevice(id) \
 {\
    CudaCall(cudaSetDevice(id));\
+}
+
+#define CudaIPCOpenMemHandle(ptr, handle) \
+{\
+   CudaCall(cudaIpcOpenMemHandle(((void**)&ptr), handle, cudaIpcMemLazyEnablePeerAccess));\
+}
+
+#define CudaIPCCloseMemHandle(ptr) \
+{\
+   CudaCall(cudaIpcCloseMemHandle(((void**)&ptr)));\
+}
+
+#define CudaIPCGetMemHandle(ptr, handle) \
+{\
+   CudaCall(cudaIpcGetMemHandle(((cudaIpcMemHandle_t*)&handle), ptr));\
 }
 
 //define some cuda kernel configuration

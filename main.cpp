@@ -73,6 +73,8 @@
 #include "xxtricrma4.hpp"
 #elif defined(USE_CUDA)
 #include "xxtric-gpu.hpp"
+#elif defined(USE_CUDA_IPC)
+#include "xxtric-gpu-ipc.hpp"
 #else
 #include "xxtric.hpp"
 #endif
