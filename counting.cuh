@@ -455,6 +455,43 @@ __global__
  );
 #endif
 
+void local_count_gpu_ext
+(
+ const GraphElem start,
+ const GraphElem end,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count,
+ cudaStream_t* stream
+ );
+
+#if defined(USE_CUDA_CG)
+template <int tilesize, int blocksize>
+__global__
+  void local_count_gpu_ext_kernel
+(
+ const GraphElem start,
+ const GraphElem end,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+ );
+#else
+template <int blocksize>
+__global__
+  void local_count_gpu_ext_kernel
+(
+ const GraphElem start,
+ const GraphElem end,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+ );
+#endif
+
 __device__ 
 void unroll_last_warp
 (

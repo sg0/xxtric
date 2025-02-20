@@ -229,12 +229,17 @@ int main(int argc, char *argv[])
 #elif defined(USE_SHMEM_SIGNAL)
     std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using SHMEM signal) on " << nprocs << " processes: " 
       << avg_t << ", " << t_min << ", " << t_max << std::endl;
+#elif defined(USE_CUDA_IPC)
+    std::cout << "Performed counting (using CUDA IPC) on " << nprocs << " GPUs" << std::endl;
 #else
     std::cout << "Avg/Min/Max execution time (secs.) for distributed counting on " << nprocs << " processes: " 
       << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #endif
 
+#if defined(USE_CUDA_IPC)
+#else
     std::cout << "User initialized per-PE buffer count: " << bufferSize << std::endl;
+#endif    
     std::cout << "Number of triangles: " << ntris << std::endl;
 
     std::cout << "TEPS: " << g->get_ne()/avg_t << std::endl;
