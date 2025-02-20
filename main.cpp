@@ -189,11 +189,19 @@ int main(int argc, char *argv[])
 
   MPI_Barrier(MPI_COMM_WORLD);
 
-
+#if defined(USE_CUDA_IPC)
+  if (bufferSize != -1)
+  {
+    if (me == 0)
+      std::cout << "*Warning*: Buffersize is ignored for selected CUDA IPC version." << std::endl;
+  }
+  TriangleCounting tr(g);
+#else
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;
   
   TriangleCounting tr(g, bufferSize);
+#endif
 
   MPI_Barrier(MPI_COMM_WORLD);
 
