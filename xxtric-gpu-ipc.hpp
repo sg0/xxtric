@@ -311,7 +311,7 @@ class TriangleCounting
     std::fill(stat_, stat_ + pdegree_, '0');
 
     CudaMallocHost(sbuf_, pdegree_*bufsize_*sizeof(GraphElem));
-    CudaMallocHost(d_counts_, size_*sizeof(GraphElem));
+    CudaMalloc(d_counts_, size_*sizeof(GraphElem));
     CudaMalloc(d_rbuf_, size_*bufsize_*sizeof(GraphElem));
     
     CudaMemset(d_counts_, 0, size_*sizeof(GraphElem));
@@ -373,19 +373,19 @@ class TriangleCounting
 
     inline void push(int owner)
     {
-      if (stat_[owner] == '0' && sbuf_ctr_[owner] > 0)
+      if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
         GraphElem *dest_buf_data, *dest_buf_count;
         CudaIPCOpenMemHandle(dest_buf_count, d_counts_handles_[owner]);
         CudaIPCOpenMemHandle(dest_buf_data, d_rbuf_handles_[owner]);
 
-        CudaMemcpyUVA(dest_buf_count, &sbuf_ctr_[owner], sizeof(GraphElem));
-        CudaMemcpyUVA(dest_buf_data, &sbuf_[owner*bufsize_], sbuf_ctr_[owner]*sizeof(GraphElem));
+        CudaMemcpyUVA(dest_buf_count, &sbuf_ctr_[pindex_[owner]], sizeof(GraphElem));
+        CudaMemcpyUVA(dest_buf_data, &sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]]*sizeof(GraphElem));
         
         CudaIPCCloseMemHandle(dest_buf_count);
         CudaIPCCloseMemHandle(dest_buf_data);
 
-        stat_[owner] = '1'; 
+        stat_[pindex_[owner]] = '1'; 
       }
     }
 
@@ -519,14 +519,16 @@ class TriangleCounting
 #endif
       for (GraphElem p = 0; p < rdegree_; p++)
       {
-        const GraphElem source = sources_[p];
-        const GraphElem count = d_counts_[source];
+        const int source = sources_[p];
+        GraphElem count;
+        CudaMemcpyDtoH(&d_counts_[source], &count, sizeof(GraphElem));
+        
         if (count > 0)
         {
           local_count_gpu_recv(count, base, &d_rbuf_[source*bufsize_], d_eind_, d_elst_, d_ntriangles_);
           
           CudaMemset(&d_rbuf_[source*bufsize_], 0, count*sizeof(GraphElem));
-          d_counts_[source] = 0;
+          CudaMemset(&d_counts_[source], 0, sizeof(GraphElem));
 
           in_nghosts_ -= count;
         }
@@ -548,12 +550,12 @@ class TriangleCounting
       while(!done)
 #endif
       {
-        pop();
-
         if (out_nghosts_ == 0)
           push();
         else
           lookup_edges();
+         
+        pop();
         
         for (int i = 0; i < pdegree_; i++)
         {
@@ -562,8 +564,7 @@ class TriangleCounting
             sbuf_ctr_[i] = 0;
             stat_[i] = '0';
           }
-        }
-
+        }       
 #if defined(USE_ALLREDUCE_FOR_EXIT)
         count = in_nghosts_;
         MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
