@@ -141,18 +141,20 @@ class TriangleCounting
     cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
       CudaStreamCreate(streams[t]);
-        
+       
+    cudaIpcMemHandle_t local_elst_handle;
     d_elst_handles_ = new cudaIpcMemHandle_t[size_];
-    CudaIPCGetMemHandle(d_elst_, d_elst_handles_[rank_]);
 
-    MPI_Allgather(&d_elst_handles_[rank_], sizeof(cudaIpcMemHandle_t), MPI_BYTE, 
+    CudaIPCGetMemHandle(d_elst_, local_elst_handle);
+
+    MPI_Allgather(&local_elst_handle, sizeof(cudaIpcMemHandle_t), MPI_BYTE, 
         d_elst_handles_, sizeof(cudaIpcMemHandle_t), MPI_BYTE, comm_);
 
     MPI_Barrier(comm_);
 
     for (GraphElem i = 0; i < lnv; i++)
     {
-      GraphElem e0, e1, le0, le1, tup[2];
+      GraphElem e0, e1, le0, le1;
       g_->edge_range(i, e0, e1);
       const GraphElem global_i = g_->local_to_global(i);
 
