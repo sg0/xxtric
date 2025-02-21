@@ -208,6 +208,9 @@ class TriangleCounting
 
     CudaDeviceSynchronize();
 
+    d_eind_nbr.clear();
+    d_elst_nbr.clear();
+
     GraphElem* d_edge_mask = nullptr;
     std::vector<GraphElem> v_edge_mask;
     nst = 0;
