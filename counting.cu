@@ -779,7 +779,7 @@ __global__
   const GraphElem b0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
      
   if(warp_tid < 2) 
-     range[warp_tid] = d_indices[(start-1-base)+warp_tid];
+     range[warp_tid] = d_indices[base+warp_tid];
 
   warp.sync();
   
@@ -835,7 +835,7 @@ __global__
   sdata[tid] = 0;
 
   if(tid < 2)
-     range[tid] = d_indices[(start-1-base)+tid];
+     range[tid] = d_indices[base+tid];
   __syncthreads();
 
   const GraphElem jstart = range[0];
