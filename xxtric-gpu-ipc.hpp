@@ -152,7 +152,7 @@ class TriangleCounting
         d_eind_handles, sizeof(cudaIpcMemHandle_t), MPI_BYTE, comm_);
     MPI_Allgather(&local_elst_handle, sizeof(cudaIpcMemHandle_t), MPI_BYTE, 
         d_elst_handles, sizeof(cudaIpcMemHandle_t), MPI_BYTE, comm_);
-   
+    
     MPI_Barrier(comm_);
 
     for (GraphElem i = 0; i < lnv; i++)
@@ -187,7 +187,7 @@ class TriangleCounting
 	    CudaIPCOpenMemHandle(owner_d_elst, d_elst_handles[owner]);
 
 	    const GraphElem base_m = edge_m.tail_-g_->get_base(owner);
-            local_count_gpu_ext(m+1, e1, base_m, (GraphElem*)owner_d_eind, (GraphElem*)owner_d_elst, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+            local_count_gpu_ext(m+1, e1, base_m, (GraphElem*)owner_d_eind, d_elst_, (GraphElem*)owner_d_elst, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
             nst++;
 
             CudaIPCCloseMemHandle(owner_d_eind);
