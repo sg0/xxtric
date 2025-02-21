@@ -747,7 +747,7 @@ void local_count_gpu_ext
   const int tilesize = TILESIZE01;
   local_count_gpu_ext_kernel<tilesize, blocksize><<<nblocks, blocksize, 0, (stream == nullptr? 0: *stream)>>>(start, end, base, d_indices, d_edge_list_local, d_edge_list_other, d_local_count);
 #else
-  local_count_gpu_ext_kernel<blocksize><<<nblocks, blocksize, 0, (stream == nullptr? 0: *stream)>>>(start, end, base, d_indices, d_edge_list, d_local_count);
+  local_count_gpu_ext_kernel<blocksize><<<nblocks, blocksize, 0, (stream == nullptr? 0: *stream)>>>(start, end, base, d_indices, d_edge_list_local, d_edge_list_other, d_local_count);
 #endif
 }
 
@@ -827,7 +827,8 @@ __global__
  const GraphElem end,
  const GraphElem base,
  const GraphElem* __restrict__ d_indices,
- const GraphElem* __restrict__ d_edge_list,
+ const GraphElem* __restrict__ d_edge_list_local,
+ const GraphElem* __restrict__ d_edge_list_other,
  GraphElem* __restrict__ d_local_count
  )
 {
@@ -845,13 +846,13 @@ __global__
 
   for (GraphElem i = start + bid; i < end; i += step)
   {
-    const GraphElem edge_i = d_edge_list[i];
+    const GraphElem edge_i = d_edge_list_local[i];
 
     for(GraphElem k = jstart + tid; k < jend; k += blocksize)
     {
-      if (d_edge_list[k] > edge_i)
+      if (d_edge_list_other[k] > edge_i)
         break;
-      if (d_edge_list[k] == edge_i)
+      if (d_edge_list_other[k] == edge_i)
       {
         sdata[tid]++;
         break;

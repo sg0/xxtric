@@ -489,7 +489,8 @@ __global__
  const GraphElem end,
  const GraphElem base,
  const GraphElem* __restrict__ d_indices,
- const GraphElem* __restrict__ d_edge_list,
+ const GraphElem* __restrict__ d_edge_list_local,
+ const GraphElem* __restrict__ d_edge_list_other,
  GraphElem* __restrict__ d_local_count
  );
 #endif
