@@ -196,6 +196,8 @@ int main(int argc, char *argv[])
       std::cout << "*Warning*: Buffersize is ignored for selected CUDA IPC version." << std::endl;
   }
   TriangleCounting tr(g);
+#elif defined(USE_SINGLE_DEVICE)
+  TriangleCountingSingle tr(g);
 #else
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;
@@ -216,27 +218,28 @@ int main(int argc, char *argv[])
   MPI_Reduce(&p_tot, &t_min, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
 
   if (me == 0) 
-  {   double avg_t = (double)(t_tot/(double)nprocs);
+  {   
+    double avg_t = (double)(t_tot/(double)nprocs);
 #if defined(USE_MPI_RMA)
-    std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using MPI RMA Fence) on " << nprocs << " processes: " 
-      << avg_t << ", " << t_min << ", " << t_max << std::endl;
+      std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using MPI RMA Fence) on " << nprocs << " processes: " 
+        << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #elif defined(USE_MPI_RMA_PASSIVE)
-    std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using MPI RMA Passive) on " << nprocs << " processes: " 
-      << avg_t << ", " << t_min << ", " << t_max << std::endl;
+      std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using MPI RMA Passive) on " << nprocs << " processes: " 
+        << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #elif defined(USE_SHMEM_ORDER)
-    std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using SHMEM ordered) on " << nprocs << " processes: " 
-      << avg_t << ", " << t_min << ", " << t_max << std::endl;
+      std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using SHMEM ordered) on " << nprocs << " processes: " 
+        << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #elif defined(USE_SHMEM_SIGNAL)
-    std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using SHMEM signal) on " << nprocs << " processes: " 
-      << avg_t << ", " << t_min << ", " << t_max << std::endl;
+      std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using SHMEM signal) on " << nprocs << " processes: " 
+        << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #elif defined(USE_CUDA_IPC)
-    std::cout << "Performed counting (using CUDA IPC) on " << nprocs << " GPUs" << std::endl;
+      std::cout << "Performed counting (using CUDA IPC) on " << nprocs << " GPUs" << std::endl;
 #else
-    std::cout << "Avg/Min/Max execution time (secs.) for distributed counting on " << nprocs << " processes: " 
-      << avg_t << ", " << t_min << ", " << t_max << std::endl;
+      std::cout << "Avg/Min/Max execution time (secs.) for distributed counting on " << nprocs << " processes: " 
+        << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #endif
 
-#if defined(USE_CUDA_IPC)
+#if defined(USE_CUDA_IPC) || defined(USE_SINGLE_DEVICE)
 #else
     std::cout << "User initialized per-PE buffer count: " << bufferSize << std::endl;
 #endif    

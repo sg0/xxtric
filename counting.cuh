@@ -225,6 +225,36 @@ void combined_local_count_gpu_kernel
 );
 #endif
 #endif // COMBINED_LOCAL_COUNTING_KERNEL
+ 
+void single_gpu_count
+(
+ const GraphElem nv,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+
+#if defined(USE_CUDA_CG)
+template <int tilesize, int blocksize>
+__global__  
+void single_gpu_count_kernel
+(
+ const GraphElem nv,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#else
+template <int blocksize>
+__global__  
+void single_gpu_count_kernel
+(
+ const GraphElem nv,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#endif
 
 #if defined(LESS_GLOBALMEM_READS)
  void local_count_gpu

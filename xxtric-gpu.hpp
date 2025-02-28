@@ -57,6 +57,74 @@
 
 #include "counting.cuh"
 
+class TriangleCountingSingle
+{
+  public:
+
+    TriangleCountingSingle(Graph* g): 
+      g_(g), ntriangles_(0), d_eind_(nullptr), d_elst_(nullptr), d_ntriangles_(nullptr)
+  {
+    const GraphElem ne = g_->get_ne();
+    const GraphElem nv = g_->get_nv();
+
+    int deviceCount;
+    cudaGetDeviceCount(&deviceCount);
+    cudaSetDevice(0);
+
+    std::vector<GraphElem> etails(ne);
+
+    for (GraphElem i = 0; i < nv; i++)
+    {
+      GraphElem e0, e1;
+      g_->edge_range(i, e0, e1);
+
+      if ((e0 + 1) == e1)
+        continue;
+
+      for (GraphElem m = e0; m < e1; m++)
+      {
+        Edge const& edge_m = g_->get_edge(m);
+        etails[m] = edge_m.tail_;
+      }
+    }
+ 
+    CudaMalloc(d_eind_, (nv+1)*sizeof(GraphElem));
+    CudaMalloc(d_elst_, ne*sizeof(GraphElem));
+    CudaMalloc(d_ntriangles_, sizeof(GraphElem));
+
+    CudaMemcpyHtoD(d_eind_, g_->edge_indices_.data(), (nv+1)*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_elst_, etails.data(), ne*sizeof(GraphElem));
+
+    CudaMemset(d_ntriangles_, 0, sizeof(GraphElem));
+    etails.clear();
+  }
+
+    ~TriangleCountingSingle() {}
+
+    GraphElem count()
+    {
+      const GraphElem nv = g_->get_nv();
+
+      single_gpu_count(nv, d_eind_, d_elst_, d_ntriangles_);
+
+      CudaDeviceSynchronize();  
+      CudaMemcpyDtoH(&ntriangles_, d_ntriangles_, sizeof(GraphElem));
+
+      return ntriangles_;
+    }
+
+    void clear()
+    {
+      CudaFree(d_eind_);
+      CudaFree(d_elst_);
+      CudaFree(d_ntriangles_);
+    }
+private:
+    Graph* g_;
+    GraphElem ntriangles_;
+    GraphElem *d_eind_, *d_elst_, *d_ntriangles_; // device
+};
+
 class TriangleCounting
 {
   public:
