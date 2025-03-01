@@ -57,6 +57,7 @@
 
 #include "counting.cuh"
 
+#if defined(USE_SINGLE_DEVICE)
 class TriangleCountingSingle
 {
   public:
@@ -104,9 +105,43 @@ class TriangleCountingSingle
     GraphElem count()
     {
       const GraphElem nv = g_->get_nv();
+#if defined(USE_SPLIT_KERNELS)
+    GraphElem nst = 0;
+    cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
+    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
+      CudaStreamCreate(streams[t]);
 
+    for (GraphElem i = 0; i < nv; i++)
+    {
+      GraphElem e0, e1;
+      GraphElem jstart, jend;
+
+      g_->edge_range(i, e0, e1);
+
+      if ((e0 + 1) == e1)
+        continue;
+
+      for (GraphElem m = e0; m < e1-1; m++)
+      {
+        Edge const& edge_m = g_->get_edge(m);
+
+        if (i >= edge_m.tail_)
+          continue;
+
+        g_->edge_range(edge_m.tail_, jstart, jend);
+        
+        local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+        nst++;
+      }
+    }
+
+    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
+      CudaStreamSynchronize(streams[t]);
+
+    delete []streams;
+#else
       single_gpu_count(nv, d_eind_, d_elst_, d_ntriangles_);
-
+#endif
       CudaDeviceSynchronize();  
       CudaMemcpyDtoH(&ntriangles_, d_ntriangles_, sizeof(GraphElem));
 
@@ -124,7 +159,7 @@ private:
     GraphElem ntriangles_;
     GraphElem *d_eind_, *d_elst_, *d_ntriangles_; // device
 };
-
+#else
 class TriangleCounting
 {
   public:
@@ -490,9 +525,9 @@ class TriangleCounting
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
       cudaStreamCreate(&streams[t]);
 
-    for (GraphElem i = 0; i < lnv; i++)
+    for (GraphElem i = 0; i < nv; i++)
     {
-      GraphElem e0, e1, tup[2];
+      GraphElem e0, e1v;
       g_->edge_range(i, e0, e1);
       const GraphElem global_i = g_->local_to_global(i);
       
@@ -1004,4 +1039,5 @@ class TriangleCounting
     
     MPI_Comm comm_;
 };
+#endif
 #endif

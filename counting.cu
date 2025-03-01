@@ -651,7 +651,6 @@ void single_gpu_count_kernel
   const GraphElem bid = blockIdx.x, step = gridDim.x;
   const int WarpSize = tilesize, BlockSize = blocksize;
   __shared__ GraphElem range[(BlockSize/WarpSize)*2];
-  GraphElem count = 0;
 
   cg::thread_block block = cg::this_thread_block();
   cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
@@ -661,6 +660,7 @@ void single_gpu_count_kernel
 
   GraphElem* t_range = &range[(block_tid/WarpSize)*2];
   GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+  GraphElem count = 0;
 
   for (GraphElem i = i0; i < nv; i += step*(BlockSize/WarpSize))
   {
@@ -669,41 +669,45 @@ void single_gpu_count_kernel
 
     warp.sync();
 
-    const GraphElem start = t_range[0] + warp_tid;
+    const GraphElem start = t_range[0];
     const GraphElem end = t_range[1];
 
-    for(GraphElem m = start; m < end-1; m += WarpSize)
+    for(GraphElem m = start + warp_tid; m < end-1; m += WarpSize)
     {
       const GraphElem edge_m = d_edge_list[m];
 
       if (i > edge_m)
       {
-        const GraphElem jstart = d_indices[edge_m];
-        const GraphElem jend = d_indices[edge_m+1];
-
         for (GraphElem n = m + 1; n < end; n++)
         {
           const GraphElem edge_n = d_edge_list[n];
 
-          for(GraphElem j = jstart; j < jend; j++)
+          if (i > edge_n)
           {
-            if (d_edge_list[j] == edge_n)
-              count++;
+            const GraphElem jstart = d_indices[edge_m];
+            const GraphElem jend = d_indices[edge_m+1];
 
-            if (__any_sync(__activemask(), d_edge_list[j] >= edge_n))
-              break;
+            for(GraphElem j = jstart; j < jend; j++)
+            {
+              if (d_edge_list[j] > edge_n)
+                break;
+              if (d_edge_list[j] == edge_n)
+              {
+                count++;
+                break;
+              }
+            }
           }
         }
       }
     }
   }
-
 #pragma unroll
-    for(int j = warp.size()/2; j > 0; j /= 2)
-      count += __shfl_down_sync(FULL_MASK, count, j);
-
-    if (warp_tid == 0)
-      atomicAdd((unsigned long long int*)d_local_count, count);
+  for(int j = warp.size()/2; j > 0; j /= 2)
+    count += __shfl_down_sync(FULL_MASK, count, j);
+  
+  if (warp_tid == 0)
+    atomicAdd((unsigned long long int*)d_local_count, count);
 }
 #else
 template <int blocksize>
@@ -738,21 +742,24 @@ void single_gpu_count_kernel
 
       if (i > edge_m)
       {
-        const GraphElem jstart = d_indices[edge_m];
-        const GraphElem jend = d_indices[edge_m+1];
-
         for (GraphElem n = m + 1; n < e1; n++)
         {
           const GraphElem edge_n = d_edge_list[n];
 
-          for(GraphElem j = jstart; j < jend; j++)
+          if (i > edge_n)
           {
-            if (d_edge_list[j] > edge_n)
-              break;
-            if (d_edge_list[j] == edge_n)
+            const GraphElem jstart = d_indices[edge_m];
+            const GraphElem jend = d_indices[edge_m+1];
+
+            for(GraphElem j = jstart; j < jend; j++)
             {
-              sdata[tid]++;
-              break;
+              if (d_edge_list[j] > edge_n)
+                break;
+              if (d_edge_list[j] == edge_n)
+              {
+                sdata[tid]++;
+                break;
+              }
             }
           }
         }
