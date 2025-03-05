@@ -226,6 +226,40 @@ void combined_local_count_gpu_kernel
 #endif
 #endif // COMBINED_LOCAL_COUNTING_KERNEL
  
+#if defined(SET_VERTEX_RANGE)
+void single_gpu_count
+(
+ const GraphElem nv,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_begin,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+
+#if defined(USE_CUDA_CG)
+template <int tilesize, int blocksize>
+__global__  
+void single_gpu_count_kernel
+(
+ const GraphElem nv,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_begin,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#else
+template <int blocksize>
+__global__  
+void single_gpu_count_kernel
+(
+ const GraphElem nv,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_begin,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#endif
+#else
 void single_gpu_count
 (
  const GraphElem nv,
@@ -254,6 +288,7 @@ void single_gpu_count_kernel
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
 );
+#endif
 #endif
 
 #if defined(LESS_GLOBALMEM_READS)

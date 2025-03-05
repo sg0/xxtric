@@ -64,6 +64,9 @@ class TriangleCountingSingle
 
     TriangleCountingSingle(Graph* g): 
       g_(g), ntriangles_(0), d_eind_(nullptr), d_elst_(nullptr), d_ntriangles_(nullptr)
+#if defined(SET_VERTEX_RANGE)
+      ,mnv_(-1), d_ebeg_(nullptr)
+#endif
   {
     const GraphElem ne = g_->get_ne();
     const GraphElem nv = g_->get_nv();
@@ -72,7 +75,14 @@ class TriangleCountingSingle
     cudaGetDeviceCount(&deviceCount);
     cudaSetDevice(0);
 
+#if defined(SET_VERTEX_RANGE)
+    std::vector<GraphElem> new_erange(nv*3, -1), upd_erange;
+#endif
+
     std::vector<GraphElem> etails(ne);
+#if defined(SHOW_GRAPH_STATS)
+    std::vector<GraphElem> erange(nv);
+#endif
 
     for (GraphElem i = 0; i < nv; i++)
     {
@@ -82,13 +92,34 @@ class TriangleCountingSingle
       if ((e0 + 1) == e1)
         continue;
 
+#if defined(SHOW_GRAPH_STATS)
+      erange[i] = e1 - e0;
+#endif
       for (GraphElem m = e0; m < e1; m++)
       {
         Edge const& edge_m = g_->get_edge(m);
         etails[m] = edge_m.tail_;
+
+#if defined(SET_VERTEX_RANGE)
+        if (i > edge_m.tail_)
+        {
+          if (new_erange[i*3] == -1)
+          {
+            new_erange[i*3]   = i;
+            new_erange[i*3+1] = m;
+            new_erange[i*3+2] = m;
+          }
+          else
+            new_erange[i*3+2] = m;
+        }
+#endif
       }
     }
- 
+
+#if defined(SHOW_GRAPH_STATS)
+    print_graph_stats(erange, nv, ne);
+#endif
+
     CudaMalloc(d_eind_, (nv+1)*sizeof(GraphElem));
     CudaMalloc(d_elst_, ne*sizeof(GraphElem));
     CudaMalloc(d_ntriangles_, sizeof(GraphElem));
@@ -96,9 +127,72 @@ class TriangleCountingSingle
     CudaMemcpyHtoD(d_eind_, g_->edge_indices_.data(), (nv+1)*sizeof(GraphElem));
     CudaMemcpyHtoD(d_elst_, etails.data(), ne*sizeof(GraphElem));
 
+#if defined(SET_VERTEX_RANGE)
+    upd_erange.reserve(nv*3);
+
+    // erase entries with -1
+    for (GraphElem n = 0; n < 3*nv; n+=3)
+    {
+      if (new_erange[n] == -1)
+        continue;
+      else
+      {
+        upd_erange.push_back(new_erange[n]);
+        upd_erange.push_back(new_erange[n+1]);
+        upd_erange.push_back(new_erange[n+2]);
+      }
+    }
+    
+    mnv_ = upd_erange.size()/3;
+    
+    CudaMalloc(d_ebeg_, 3*mnv_*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_ebeg_, upd_erange.data(), 3*mnv_*sizeof(GraphElem));
+#endif
+
     CudaMemset(d_ntriangles_, 0, sizeof(GraphElem));
+    
     etails.clear();
+#if defined(SHOW_GRAPH_STATS)
+    erange.clear();
+#endif
+#if defined(SET_VERTEX_RANGE)
+    new_erange.clear();
+    upd_erange.clear();
+#endif
   }
+
+#if defined(SHOW_GRAPH_STATS)
+    void print_graph_stats(std::vector<GraphElem> const& vdeg, const GraphElem nv, const GraphElem ne)
+    {
+      GraphElem sumdeg = 0, maxdeg = 0, sdevs = 0;
+      sumdeg = std::reduce(vdeg.begin(), vdeg.end());
+      auto max_deg = std::max_element(vdeg.begin(), vdeg.end());
+      maxdeg = *max_deg;
+
+      GraphWeight average  = (GraphWeight) sumdeg / nv;
+       
+      for (auto d : vdeg)
+      {
+        GraphElem d_sq = d - average;
+        sdevs += d_sq*d_sq;
+      }
+
+      GraphWeight var = (GraphWeight) sdevs / nv; 
+      GraphWeight stddev   = sqrt(var);
+      
+      std::cout << std::endl;
+      std::cout << "-------------------------------------------------------" << std::endl;
+      std::cout << "Graph edge distribution characteristics" << std::endl;
+      std::cout << "-------------------------------------------------------" << std::endl;
+      std::cout << "Number of vertices: " << nv << std::endl;
+      std::cout << "Number of edges: " << ne << std::endl;
+      std::cout << "Maximum number of edges: " << maxdeg << std::endl;
+      std::cout << "Average number of edges: " << average << std::endl;
+      std::cout << "Variance: " << var << std::endl;
+      std::cout << "Standard deviation: " << stddev << std::endl;
+      std::cout << "-------------------------------------------------------" << std::endl;
+    }
+#endif
 
     ~TriangleCountingSingle() {}
 
@@ -139,9 +233,12 @@ class TriangleCountingSingle
       CudaStreamSynchronize(streams[t]);
 
     delete []streams;
+#elif defined(SET_VERTEX_RANGE)
+      single_gpu_count(mnv_, d_eind_, d_ebeg_, d_elst_, d_ntriangles_);
 #else
       single_gpu_count(nv, d_eind_, d_elst_, d_ntriangles_);
 #endif
+
       CudaDeviceSynchronize();  
       CudaMemcpyDtoH(&ntriangles_, d_ntriangles_, sizeof(GraphElem));
 
@@ -153,11 +250,20 @@ class TriangleCountingSingle
       CudaFree(d_eind_);
       CudaFree(d_elst_);
       CudaFree(d_ntriangles_);
+
+#if defined(SET_VERTEX_RANGE)
+      CudaFree(d_ebeg_);
+#endif
     }
+
 private:
     Graph* g_;
     GraphElem ntriangles_;
     GraphElem *d_eind_, *d_elst_, *d_ntriangles_; // device
+#if defined(SET_VERTEX_RANGE)
+    GraphElem mnv_;
+    GraphElem *d_ebeg_;
+#endif
 };
 #else
 class TriangleCounting
