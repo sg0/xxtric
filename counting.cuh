@@ -259,6 +259,40 @@ void single_gpu_count_kernel
  GraphElem* __restrict__ d_local_count
 );
 #endif
+#elif defined(SET_VERTEX_RANGE_SPLIT)
+ void single_gpu_count_masked
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count,
+ cudaStream_t stream
+);
+
+#if defined(USE_CUDA_CG)
+template <int tilesize, int blocksize>
+__global__  
+ void single_gpu_count_masked_kernel
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#else
+template <int blocksize>
+__global__  
+ void single_gpu_count_masked_kernel
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#endif
 #else
 void single_gpu_count
 (
