@@ -90,7 +90,7 @@ class TriangleCountingSingle
     {
       GraphElem e0, e1;
       g_->edge_range(i, e0, e1);
-      
+
       if ((e0 + 1) == e1)
         continue;
 
@@ -102,27 +102,27 @@ class TriangleCountingSingle
         Edge const& edge_m = g_->get_edge(m);
         etails[m] = edge_m.tail_;
 
-        if (i > edge_m.tail_)
-        {
+        if (i >= edge_m.tail_)
+          continue;
+
 #if defined(SET_VERTEX_RANGE) 
-          if (new_erange[i*3] == -1)
-          {
-            new_erange[i*3]   = i;
-            new_erange[i*3+1] = m;
-            new_erange[i*3+2] = m;
-          }
-          else
-            new_erange[i*3+2] = m;
+        if (new_erange[i*3] == -1)
+        {
+          new_erange[i*3]   = i;
+          new_erange[i*3+1] = m;
+          new_erange[i*3+2] = m;
+        }
+        else
+          new_erange[i*3+2] = m;
 #elif defined(SET_VERTEX_RANGE_SPLIT)
-          if (m != (e1-1))
-          {
-            GraphElem le0, le1;
-            g_->edge_range(edge_m.tail_, le0, le1);
-            edge_mask_.push_back(std::array<GraphElem, 4>{e1, m, (le1-le0+1), i});
-          }
+        if (m != (e1-1))
+        {
+          GraphElem le0, le1;
+          g_->edge_range(edge_m.tail_, le0, le1);
+          edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, (le1-le0+1)});
+        }
 #else
 #endif
-        }
       }
     }
 
@@ -264,11 +264,10 @@ class TriangleCountingSingle
     {
       v_edge_mask.push_back(edge_mask_[i][0]);
       v_edge_mask.push_back(edge_mask_[i][1]);
-      v_edge_mask.push_back(edge_mask_[i][3]);
     }
-    const GraphElem nedges = v_edge_mask.size()/3;
-    CudaMalloc(d_edge_mask, nedges*3*sizeof(GraphElem));
-    CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*3*sizeof(GraphElem));
+    const GraphElem nedges = v_edge_mask.size()/2;
+    CudaMalloc(d_edge_mask, nedges*2*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*2*sizeof(GraphElem));
     
     // bulk GPU kernel
     single_gpu_count_masked(nedges, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[0]);
@@ -291,7 +290,6 @@ class TriangleCountingSingle
       {
         v_edge_mask.push_back(edge_mask_[i][0]);
         v_edge_mask.push_back(edge_mask_[i][1]);
-        v_edge_mask.push_back(edge_mask_[i][3]);
       }
       else // grid-block over edge-list
       {
@@ -304,9 +302,9 @@ class TriangleCountingSingle
       }
     }
 
-    const GraphElem nedges = v_edge_mask.size()/3;
-    CudaMalloc(d_edge_mask, nedges*3*sizeof(GraphElem));
-    CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*3*sizeof(GraphElem));
+    const GraphElem nedges = v_edge_mask.size()/2;
+    CudaMalloc(d_edge_mask, nedges*2*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*2*sizeof(GraphElem));
 
     // grid-block over vertices
     single_gpu_count_masked(nedges, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[nst % MAX_CUDA_STREAMS]);
@@ -350,7 +348,7 @@ private:
     GraphElem mnv_;
     GraphElem *d_ebeg_;
 #elif defined(SET_VERTEX_RANGE_SPLIT)
-    std::vector<std::array<GraphElem,4>> edge_mask_;
+    std::vector<std::array<GraphElem,3>> edge_mask_;
 #else
 #endif
 };

@@ -874,7 +874,7 @@ __global__
   
   const GraphElem bid = blockIdx.x, step = gridDim.x;
   const int WarpSize = tilesize, BlockSize = blocksize;
-  __shared__ GraphElem range[(BlockSize/WarpSize)*3];
+  __shared__ GraphElem range[(BlockSize/WarpSize)*2];
 
   cg::thread_block block = cg::this_thread_block();
   cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
@@ -882,7 +882,7 @@ __global__
   const GraphElem block_tid = block.thread_rank();
   const GraphElem warp_tid = warp.thread_rank();
 
-  GraphElem* t_range = &range[(block_tid/WarpSize)*3];
+  GraphElem* t_range = &range[(block_tid/WarpSize)*2];
   GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
   GraphElem count = 0;
 
@@ -890,17 +890,15 @@ __global__
   {
     if(warp_tid == 0)
     {
-      const GraphElem id = 3*i;
+      const GraphElem id = 2*i;
       t_range[0] = d_edge_mask[id];
       t_range[1] = d_edge_mask[id+1];
-      t_range[2] = d_edge_mask[id+2];
     }
 
     warp.sync();
 
     const GraphElem e_end = t_range[0];
     const GraphElem m = t_range[1];
-    const GraphElem vtx = t_range[2];
 
     const GraphElem edge_m = d_edge_list[m];
     const GraphElem jstart = d_indices[edge_m];
@@ -946,7 +944,7 @@ __global__
 {
   GraphElem tid = threadIdx.x, bid = blockIdx.x, step = gridDim.x;
   volatile __shared__ GraphElem sdata[blocksize];
-  __shared__ GraphElem range[3];
+  __shared__ GraphElem range[2];
   sdata[tid] = 0;
     
   __syncthreads();
@@ -955,17 +953,15 @@ __global__
   {
     if(tid == 0)
     {
-      const GraphElem id = 3*i;
+      const GraphElem id = 2*i;
       range[0] = d_edge_mask[id];
       range[1] = d_edge_mask[id+1];
-      range[2] = d_edge_mask[id+2];
     }
 
     __syncthreads();
 
     const GraphElem e1 = range[0];
     const GraphElem start = range[1];
-    const GraphElem vtx = range[2];
     const GraphElem edge_m = d_edge_list[start];
     const GraphElem jstart = d_indices[edge_m];
     const GraphElem jend = d_indices[edge_m+1];
