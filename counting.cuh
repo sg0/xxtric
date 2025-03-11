@@ -58,7 +58,7 @@ inline void CudaAssert(cudaError_t code, const char *file, int line, bool abort=
 
 #define CudaStreamCreateNB(stream) \
 {\
-   CudaCall(cudaStreamCreateWithFlags((cudaStream_t*)&stream), cudaStreamNonBlocking);\
+   CudaCall(cudaStreamCreateWithFlags((cudaStream_t*)&stream, cudaStreamNonBlocking));\
 }
 
 #define CudaStreamDestroy(stream) \

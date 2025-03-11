@@ -160,7 +160,7 @@ class TriangleCountingSingle
 #endif
 
     CudaMemset(d_ntriangles_, 0, sizeof(GraphElem));
-    
+
     etails.clear();
 #if defined(SHOW_GRAPH_STATS)
     erange.clear();
@@ -213,8 +213,11 @@ class TriangleCountingSingle
     GraphElem nst = 0;
     cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
-      CudaStreamCreate(streams[t]);
+      CudaStreamCreateNB(streams[t]);
 
+#if defined(USE_OPENMP)
+#pragma omp parallel for num_threads(MAX_CUDA_STREAMS)
+#endif
     for (GraphElem i = 0; i < nv; i++)
     {
       GraphElem e0, e1;
@@ -222,26 +225,25 @@ class TriangleCountingSingle
 
       g_->edge_range(i, e0, e1);
 
-      if ((e0 + 1) == e1)
-        continue;
-
-      for (GraphElem m = e0; m < e1-1; m++)
+      if ((e0 + 1) != e1)
       {
-        Edge const& edge_m = g_->get_edge(m);
+        for (GraphElem m = e0; m < e1-1; m++)
+        {
+          Edge const& edge_m = g_->get_edge(m);
 
-        if (i >= edge_m.tail_)
-          continue;
+          if (i >= edge_m.tail_)
+            continue;
 
-        g_->edge_range(edge_m.tail_, jstart, jend);
-        
-        local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
-        nst++;
+          g_->edge_range(edge_m.tail_, jstart, jend);
+
+          local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+          nst++;
+        }
       }
     }
 
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
       CudaStreamSynchronize(streams[t]);
-
     delete []streams;
 #elif defined(SET_VERTEX_RANGE)
     single_gpu_count(mnv_, d_eind_, d_ebeg_, d_elst_, d_ntriangles_);
@@ -252,7 +254,7 @@ class TriangleCountingSingle
     GraphElem nst = 0;
     cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
-      CudaStreamCreate(streams[t]);
+      CudaStreamCreateNB(streams[t]);
 
 #if defined(SORT_BY_NUM_EDGES)
     std::sort(edge_mask_.begin(), edge_mask_.end(), 
@@ -274,6 +276,9 @@ class TriangleCountingSingle
     nst++;
 
     // remaining GPU kernels
+#if defined(USE_OPENMP)
+#pragma omp parallel for num_threads(MAX_CUDA_STREAMS)
+#endif
     for (GraphElem i = edge_mask_.size()/2; i < edge_mask_.size(); i++)
     {
       GraphElem jstart, jend;
@@ -312,8 +317,8 @@ class TriangleCountingSingle
 
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
       CudaStreamSynchronize(streams[t]);
-
     delete []streams;
+
     CudaFree(d_edge_mask);
     v_edge_mask.clear();
 #else
@@ -352,7 +357,7 @@ private:
 #else
 #endif
 };
-#else
+#else // MPI-based distributed-memory counting
 class TriangleCounting
 {
   public:
