@@ -304,20 +304,20 @@ class TriangleCountingSingle
       nst++;
     }
 #else
-    // grid-block over edge-list
-    GraphElem jstart, jend;
-    
-    for (GraphElem i = 0; i < edge_mask_.size(); i++)
-    {
-        Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
-        g_->edge_range(edge_m.tail_, jstart, jend);
-
-        local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
-        nst++;
-    }
-
     // grid-block over vertices
     single_gpu_count_masked(v_edge_mask_.size()/2, d_edge_mask_, d_eind_, d_elst_, d_ntriangles_, streams[nst % MAX_CUDA_STREAMS]);
+    nst++;
+
+    // grid-block over edge-list
+    for (GraphElem i = 0; i < edge_mask_.size(); i++)
+    {
+      GraphElem jstart, jend;
+      Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
+      g_->edge_range(edge_m.tail_, jstart, jend);
+
+      local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+      nst++;
+    }
 #endif
 
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
