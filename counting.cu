@@ -1001,7 +1001,7 @@ __global__
     atomicAdd((unsigned long long int*)d_local_count, sdata[0]);
 }
 #endif
-#else  
+#else /// default single GPU kernel 
  void single_gpu_count
 (
  const GraphElem nv,
@@ -1155,6 +1155,8 @@ void single_gpu_count_kernel
     for(GraphElem m = e0 + tid; m < e1-1; m += blocksize)
     {
       const GraphElem edge_m = d_edge_list[m];
+      const GraphElem jstart = d_indices[edge_m];
+      const GraphElem jend = d_indices[edge_m+1];
 
       if (i > edge_m)
       {
@@ -1164,9 +1166,6 @@ void single_gpu_count_kernel
 
           if (i > edge_n)
           {
-            const GraphElem jstart = d_indices[edge_m];
-            const GraphElem jend = d_indices[edge_m+1];
-
             for(GraphElem j = jstart; j < jend; j++)
             {
               if (d_edge_list[j] > edge_n)
@@ -1260,8 +1259,6 @@ __global__
 
   const GraphElem b0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
     
-  warp.sync();
-
   for (GraphElem i = start + b0; i < end; i += step*(BlockSize/WarpSize))
   {
     const GraphElem edge_i = d_edge_list[i];
@@ -1271,7 +1268,7 @@ __global__
       if (d_edge_list[k] == edge_i)
         count++;
 
-        if (__any_sync(__activemask(), d_edge_list[k] >= edge_i))
+      if (__any_sync(__activemask(), d_edge_list[k] >= edge_i))
         break;
       /*
       if (d_edge_list[k] > edge_i)

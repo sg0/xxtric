@@ -67,7 +67,7 @@ class TriangleCountingSingle
 #if defined(SET_VERTEX_RANGE)
       ,mnv_(-1), d_ebeg_(nullptr)
 #elif defined(SET_VERTEX_RANGE_SPLIT)
-      ,edge_mask_(0)  
+      ,edge_mask_(0), d_edge_mask_(nullptr), v_edge_mask_(0) 
 #endif
   {
     const GraphElem ne = g_->get_ne();
@@ -117,9 +117,21 @@ class TriangleCountingSingle
 #elif defined(SET_VERTEX_RANGE_SPLIT)
         if (m != (e1-1))
         {
-          GraphElem le0, le1;
+          GraphElem le0, le1, nbrs_m;
           g_->edge_range(edge_m.tail_, le0, le1);
-          edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, (le1-le0+1)});
+          nbrs_m = (le1-le0+1);
+
+#if defined(SORT_BY_NUM_EDGES)
+          edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, nbrs_m});
+#else
+          if ((e1-m+1) > nbrs_m) // e1-m > #nbrs(m)
+          {
+            v_edge_mask_.push_back(e1);
+            v_edge_mask_.push_back(m);
+          }
+          else
+            edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, -1});
+#endif
         }
 #else
 #endif
@@ -136,6 +148,12 @@ class TriangleCountingSingle
 
     CudaMemcpyHtoD(d_eind_, g_->edge_indices_.data(), (nv+1)*sizeof(GraphElem));
     CudaMemcpyHtoD(d_elst_, etails.data(), ne*sizeof(GraphElem));
+
+#if defined(SET_VERTEX_RANGE_SPLIT) && !defined(SORT_BY_NUM_EDGES)
+    const GraphElem nedges = v_edge_mask_.size()/2;
+    CudaMalloc(d_edge_mask_, nedges*2*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_edge_mask_, v_edge_mask_.data(), nedges*2*sizeof(GraphElem));
+#endif
 
 #if defined(SET_VERTEX_RANGE)
     upd_erange.reserve(nv*3);
@@ -248,9 +266,6 @@ class TriangleCountingSingle
 #elif defined(SET_VERTEX_RANGE)
     single_gpu_count(mnv_, d_eind_, d_ebeg_, d_elst_, d_ntriangles_);
 #elif defined(SET_VERTEX_RANGE_SPLIT)
-    GraphElem* d_edge_mask = nullptr;
-    std::vector<GraphElem> v_edge_mask;
-
     GraphElem nst = 0;
     cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
@@ -264,15 +279,15 @@ class TriangleCountingSingle
     // of neighborhood size 
     for (GraphElem i = 0; i < edge_mask_.size()/2; i++)
     {
-      v_edge_mask.push_back(edge_mask_[i][0]);
-      v_edge_mask.push_back(edge_mask_[i][1]);
+      v_edge_mask_.push_back(edge_mask_[i][0]);
+      v_edge_mask_.push_back(edge_mask_[i][1]);
     }
-    const GraphElem nedges = v_edge_mask.size()/2;
-    CudaMalloc(d_edge_mask, nedges*2*sizeof(GraphElem));
-    CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*2*sizeof(GraphElem));
+    const GraphElem nedges = v_edge_mask_.size()/2;
+    CudaMalloc(d_edge_mask_, nedges*2*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_edge_mask_, v_edge_mask_.data(), nedges*2*sizeof(GraphElem));
     
     // bulk GPU kernel
-    single_gpu_count_masked(nedges, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[0]);
+    single_gpu_count_masked(nedges, d_edge_mask_, d_eind_, d_elst_, d_ntriangles_, streams[0]);
     nst++;
 
     // remaining GPU kernels
@@ -289,38 +304,25 @@ class TriangleCountingSingle
       nst++;
     }
 #else
+    // grid-block over edge-list
+    GraphElem jstart, jend;
+    
     for (GraphElem i = 0; i < edge_mask_.size(); i++)
     {
-      if ((edge_mask_[i][0]-edge_mask_[i][1]+1) > edge_mask_[i][2]) // e1-m > #nbrs(m)
-      {
-        v_edge_mask.push_back(edge_mask_[i][0]);
-        v_edge_mask.push_back(edge_mask_[i][1]);
-      }
-      else // grid-block over edge-list
-      {
-        GraphElem jstart, jend;
         Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
         g_->edge_range(edge_m.tail_, jstart, jend);
 
         local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
         nst++;
-      }
     }
 
-    const GraphElem nedges = v_edge_mask.size()/2;
-    CudaMalloc(d_edge_mask, nedges*2*sizeof(GraphElem));
-    CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*2*sizeof(GraphElem));
-
     // grid-block over vertices
-    single_gpu_count_masked(nedges, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[nst % MAX_CUDA_STREAMS]);
+    single_gpu_count_masked(v_edge_mask_.size()/2, d_edge_mask_, d_eind_, d_elst_, d_ntriangles_, streams[nst % MAX_CUDA_STREAMS]);
 #endif
 
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
       CudaStreamSynchronize(streams[t]);
     delete []streams;
-
-    CudaFree(d_edge_mask);
-    v_edge_mask.clear();
 #else
     single_gpu_count(nv, d_eind_, d_elst_, d_ntriangles_);
 #endif
@@ -341,6 +343,8 @@ class TriangleCountingSingle
       CudaFree(d_ebeg_);
 #elif defined(SET_VERTEX_RANGE_SPLIT)
       edge_mask_.clear();
+      CudaFree(d_edge_mask_);
+      v_edge_mask_.clear();
 #else
 #endif
     }
@@ -354,6 +358,11 @@ private:
     GraphElem *d_ebeg_;
 #elif defined(SET_VERTEX_RANGE_SPLIT)
     std::vector<std::array<GraphElem,3>> edge_mask_;
+    GraphElem *d_edge_mask_;
+#if defined(SORT_BY_NUM_EDGES)
+#else
+    std::vector<GraphElem> v_edge_mask_;
+#endif
 #else
 #endif
 };
