@@ -985,7 +985,7 @@ __global__
     }
   }
     
-  //__syncthreads();
+  __syncthreads();
 
   for (GraphElem s=blocksize/2; s>32; s>>=1) 
   {
