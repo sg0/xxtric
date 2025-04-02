@@ -73,9 +73,16 @@ class TriangleCountingSingle
     const GraphElem ne = g_->get_ne();
     const GraphElem nv = g_->get_nv();
 
-    int deviceCount;
+    int deviceCount, device_id = 0;
+    cudaDeviceProp prop;
+    
     cudaGetDeviceCount(&deviceCount);
-    cudaSetDevice(0);
+    cudaSetDevice(device_id);
+
+    GraphWeight c_factor = 0.75;
+    cudaGetDeviceProperties(&prop, device_id);
+    size_t l2_size = MIN(int(prop.l2CacheSize * c_factor), prop.persistingL2CacheMaxSize);
+    cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, l2_size);
 
 #if defined(SET_VERTEX_RANGE)
     std::vector<GraphElem> new_erange(nv*3, -1), upd_erange;
