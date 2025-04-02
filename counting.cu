@@ -586,6 +586,50 @@ void local_count_gpu_kernel
 #endif
 
 /// single GPU counting
+__device__ bool edge_exists
+(
+ GraphElem e0, 
+ GraphElem e1, 
+ GraphElem se, 
+ const GraphElem* __restrict__ d_edge_list
+ )
+{
+  GraphElem const& first = d_edge_list[e0];
+  GraphElem const& last = d_edge_list[e1-1];
+
+  if (se == last || se == first)
+    return true;
+
+  if (se > first && se < last)
+  {
+    GraphElem const& mid = d_edge_list[MID(e0, e1)];
+
+    if (se == mid)
+      return true;
+    else if (se > mid)
+    {
+      for (GraphElem e = MID(e0, e1) + 1; e < e1; e++)
+      {
+        if (d_edge_list[e] > se)
+          break;
+        if (d_edge_list[e] == se)
+          return true;
+      }
+    }
+    else
+    {
+      for (GraphElem e = e0; e < MID(e0, e1); e++)
+      {
+        if (d_edge_list[e] > se)
+          break;
+        if (d_edge_list[e] == se)
+          return true;
+      }
+    }
+  }
+
+  return false;
+}
 
 #if defined(SET_VERTEX_RANGE)
  void single_gpu_count
@@ -906,8 +950,10 @@ __global__
 
     for(GraphElem n = m + 1 + warp_tid; n < e_end; n += WarpSize)
     {
+      if (edge_exists(jstart, jend, d_edge_list[n], d_edge_list))
+        count++;
+      /*
       const GraphElem edge_n = d_edge_list[n];
-
       for(GraphElem j = jstart; j < jend; j++)
       {
         const GraphElem edge_j = d_edge_list[j];
@@ -920,6 +966,7 @@ __global__
           break;
         }
       }
+      */
     }
   }
 
@@ -968,6 +1015,7 @@ __global__
 
     for(GraphElem n = start + 1 + tid; n < e1; n += blocksize)
     {
+      /*
       const GraphElem edge_n = d_edge_list[n];
 
       for(GraphElem j = jstart; j < jend; j++)
@@ -982,6 +1030,9 @@ __global__
           break;
         }
       }
+      */
+      if (edge_exists(jstart, jend, d_edge_list[n], d_edge_list))
+        sdata[tid]++;
     }
   }
     
@@ -1091,6 +1142,8 @@ void single_gpu_count_kernel
     for(GraphElem m = start + warp_tid; m < end-1; m += WarpSize)
     {
       const GraphElem edge_m = d_edge_list[m];
+      const GraphElem jstart = d_indices[edge_m];
+      const GraphElem jend = d_indices[edge_m+1];
 
       if (i > edge_m)
       {
@@ -1100,19 +1153,20 @@ void single_gpu_count_kernel
 
           if (i > edge_n)
           {
-            const GraphElem jstart = d_indices[edge_m];
-            const GraphElem jend = d_indices[edge_m+1];
-
-            for(GraphElem j = jstart; j < jend; j++)
-            {
-              if (d_edge_list[j] > edge_n)
-                break;
-              if (d_edge_list[j] == edge_n)
-              {
-                count++;
-                break;
-              }
-            }
+            if (edge_exists(jstart, jend, edge_n, d_edge_list))
+              count++;
+            /*
+               for(GraphElem j = jstart; j < jend; j++)
+               {
+               if (d_edge_list[j] > edge_n)
+               break;
+               if (d_edge_list[j] == edge_n)
+               {
+               count++;
+               break;
+               }
+               }
+             */
           }
         }
       }
@@ -1155,17 +1209,21 @@ void single_gpu_count_kernel
     for(GraphElem m = e0 + tid; m < e1-1; m += blocksize)
     {
       const GraphElem edge_m = d_edge_list[m];
-      const GraphElem jstart = d_indices[edge_m];
-      const GraphElem jend = d_indices[edge_m+1];
-
+      
       if (i > edge_m)
       {
+        const GraphElem jstart = d_indices[edge_m];
+        const GraphElem jend = d_indices[edge_m+1];
+
         for (GraphElem n = m + 1; n < e1; n++)
         {
           const GraphElem edge_n = d_edge_list[n];
 
           if (i > edge_n)
           {
+            if (edge_exists(jstart, jend, edge_n, d_edge_list))
+              sdata[tid]++;
+            /*
             for(GraphElem j = jstart; j < jend; j++)
             {
               if (d_edge_list[j] > edge_n)
@@ -1176,6 +1234,7 @@ void single_gpu_count_kernel
                 break;
               }
             }
+            */
           }
         }
       }
@@ -1265,10 +1324,12 @@ __global__
 
     for(GraphElem k = jstart + warp_tid; k < jend; k += WarpSize)
     {
-      if (d_edge_list[k] == edge_i)
+      GraphElem edge_k = d_edge_list[k];
+      
+      if (edge_k == edge_i)
         count++;
 
-      if (__any_sync(__activemask(), d_edge_list[k] >= edge_i))
+      if (__any_sync(__activemask(), edge_k >= edge_i))
         break;
       /*
       if (d_edge_list[k] > edge_i)

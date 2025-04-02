@@ -124,7 +124,8 @@ class TriangleCountingSingle
 #if defined(SORT_BY_NUM_EDGES)
           edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, nbrs_m});
 #else
-          if ((e1-m+1) > nbrs_m) // e1-m > #nbrs(m)
+          //if ((e1-m+1) > nbrs_m) // e1-m > #nbrs(m)
+          if ((e1-m+1) < nbrs_m) // e1-m < #nbrs(m)
           {
             v_edge_mask_.push_back(e1);
             v_edge_mask_.push_back(m);
@@ -273,7 +274,8 @@ class TriangleCountingSingle
 
 #if defined(SORT_BY_NUM_EDGES)
     std::sort(edge_mask_.begin(), edge_mask_.end(), 
-      [](auto a, auto b) { return a[2] > b[2]; });   
+      [](auto a, auto b) { return a[2] < b[2]; });   
+      //[](auto a, auto b) { return a[2] > b[2]; });   
    
     // copy 50% of the smallest local edges in terms 
     // of neighborhood size 
@@ -305,8 +307,7 @@ class TriangleCountingSingle
     }
 #else
     // grid-block over vertices
-    single_gpu_count_masked(v_edge_mask_.size()/2, d_edge_mask_, d_eind_, d_elst_, d_ntriangles_, streams[nst % MAX_CUDA_STREAMS]);
-    nst++;
+    single_gpu_count_masked(v_edge_mask_.size()/2, d_edge_mask_, d_eind_, d_elst_, d_ntriangles_, streams[0]);
 
     // grid-block over edge-list
     for (GraphElem i = 0; i < edge_mask_.size(); i++)
@@ -314,9 +315,9 @@ class TriangleCountingSingle
       GraphElem jstart, jend;
       Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
       g_->edge_range(edge_m.tail_, jstart, jend);
-
-      local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+      
       nst++;
+      local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
     }
 #endif
 
@@ -359,10 +360,7 @@ private:
 #elif defined(SET_VERTEX_RANGE_SPLIT)
     std::vector<std::array<GraphElem,3>> edge_mask_;
     GraphElem *d_edge_mask_;
-#if defined(SORT_BY_NUM_EDGES)
-#else
     std::vector<GraphElem> v_edge_mask_;
-#endif
 #else
 #endif
 };
