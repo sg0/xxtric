@@ -274,48 +274,58 @@ class TriangleCountingSingle
 
 #if defined(SORT_BY_NUM_EDGES)
     std::sort(edge_mask_.begin(), edge_mask_.end(), 
-      [](auto a, auto b) { return a[2] < b[2]; });   
-      //[](auto a, auto b) { return a[2] > b[2]; });   
-   
-    // copy 50% of the smallest local edges in terms 
-    // of neighborhood size 
-    for (GraphElem i = 0; i < edge_mask_.size()/2; i++)
+      [](auto a, auto b) { return a[2] > b[2]; });   
+
+    const GraphWeight factor = 0.999;
+    assert(factor <= 1.0);
+    const GraphElem cutoff_n = (GraphElem)((GraphWeight)edge_mask_.size()*factor);
+
+    // multiple GPU kernels
+#if defined(USE_OPENMP)
+#pragma omp declare reduction(merge : std::vector<GraphElem> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+#pragma omp parallel for firstprivate(cutoff_n) reduction(merge: v_edge_mask_) 
+#endif
+    for (GraphElem i = 0; i < edge_mask_.size(); i++)
     {
-      v_edge_mask_.push_back(edge_mask_[i][0]);
-      v_edge_mask_.push_back(edge_mask_[i][1]);
+      if (i < cutoff_n)
+      {
+        v_edge_mask_.push_back(edge_mask_[i][0]);
+        v_edge_mask_.push_back(edge_mask_[i][1]);
+      }
+      else
+      {
+        GraphElem jstart, jend;
+        Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
+        g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
+
+        local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+#pragma omp atomic update 
+        nst++;
+      }
     }
+    
+    // copy x% of the smallest local edges in terms 
+    // of neighborhood size 
     const GraphElem nedges = v_edge_mask_.size()/2;
     CudaMalloc(d_edge_mask_, nedges*2*sizeof(GraphElem));
     CudaMemcpyHtoD(d_edge_mask_, v_edge_mask_.data(), nedges*2*sizeof(GraphElem));
     
     // bulk GPU kernel
     single_gpu_count_masked(nedges, d_edge_mask_, d_eind_, d_elst_, d_ntriangles_, streams[0]);
-    nst++;
-
-    // remaining GPU kernels
-#if defined(USE_OPENMP)
-#pragma omp parallel for num_threads(MAX_CUDA_STREAMS)
-#endif
-    for (GraphElem i = edge_mask_.size()/2; i < edge_mask_.size(); i++)
-    {
-      GraphElem jstart, jend;
-      Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
-      g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
-
-      local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
-      nst++;
-    }
 #else
     // grid-block over vertices
     single_gpu_count_masked(v_edge_mask_.size()/2, d_edge_mask_, d_eind_, d_elst_, d_ntriangles_, streams[0]);
 
     // grid-block over edge-list
+#if defined(USE_OPENMP)
+#pragma omp parallel for
+#endif
     for (GraphElem i = 0; i < edge_mask_.size(); i++)
     {
       GraphElem jstart, jend;
       Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
       g_->edge_range(edge_m.tail_, jstart, jend);
-      
+#pragma omp atomic update 
       nst++;
       local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
     }
