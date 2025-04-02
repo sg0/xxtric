@@ -86,6 +86,15 @@ class TriangleCountingSingle
     std::vector<GraphElem> erange(nv);
 #endif
 
+#if defined(USE_OPENMP)
+#if defined(SET_VERTEX_RANGE_SPLIT)
+#pragma omp declare reduction(merge : std::vector<GraphElem> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+#pragma omp declare reduction(merge : std::vector<std::array<GraphElem, 3>> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+#pragma omp parallel for reduction(merge: v_edge_mask_, edge_mask_) 
+#else
+#pragma omp parallel for  
+#endif
+#endif
     for (GraphElem i = 0; i < nv; i++)
     {
       GraphElem e0, e1;

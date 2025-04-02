@@ -1142,11 +1142,12 @@ void single_gpu_count_kernel
     for(GraphElem m = start + warp_tid; m < end-1; m += WarpSize)
     {
       const GraphElem edge_m = d_edge_list[m];
-      const GraphElem jstart = d_indices[edge_m];
-      const GraphElem jend = d_indices[edge_m+1];
-
+      
       if (i > edge_m)
       {
+        const GraphElem jstart = d_indices[edge_m];
+        const GraphElem jend = d_indices[edge_m+1];
+
         for (GraphElem n = m + 1; n < end; n++)
         {
           const GraphElem edge_n = d_edge_list[n];
