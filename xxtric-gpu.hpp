@@ -138,7 +138,7 @@ class TriangleCountingSingle
           nbrs_m = (le1-le0+1);
 
 #if defined(SORT_BY_NUM_EDGES)
-          edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, nbrs_m});
+          edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, (e1-m+1)});
 #else
           //if ((e1-m+1) > nbrs_m) // e1-m > #nbrs(m)
           if ((e1-m+1) < nbrs_m) // e1-m < #nbrs(m)
@@ -170,6 +170,11 @@ class TriangleCountingSingle
     const GraphElem nedges = v_edge_mask_.size()/2;
     CudaMalloc(d_edge_mask_, nedges*2*sizeof(GraphElem));
     CudaMemcpyHtoD(d_edge_mask_, v_edge_mask_.data(), nedges*2*sizeof(GraphElem));
+#endif
+
+#if defined(SET_VERTEX_RANGE_SPLIT) && defined(SORT_BY_NUM_EDGES)
+    std::sort(edge_mask_.begin(), edge_mask_.end(), 
+      [](auto a, auto b) { return a[2] > b[2]; });   
 #endif
 
 #if defined(SET_VERTEX_RANGE)
@@ -289,9 +294,6 @@ class TriangleCountingSingle
       CudaStreamCreateNB(streams[t]);
 
 #if defined(SORT_BY_NUM_EDGES)
-    std::sort(edge_mask_.begin(), edge_mask_.end(), 
-      [](auto a, auto b) { return a[2] > b[2]; });   
-
     const GraphWeight factor = 0.999;
     assert(factor <= 1.0);
     const GraphElem cutoff_n = (GraphElem)((GraphWeight)edge_mask_.size()*factor);
