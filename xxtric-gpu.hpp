@@ -256,12 +256,12 @@ class TriangleCountingSingle
       CudaStreamCreateNB(streams[t]);
 
 #if defined(USE_OPENMP)
-#pragma omp parallel for num_threads(MAX_CUDA_STREAMS)
+#pragma omp parallel for
 #endif
     for (GraphElem i = 0; i < nv; i++)
     {
       GraphElem e0, e1;
-      GraphElem jstart, jend;
+      GraphElem jstart, jend, id;
 
       g_->edge_range(i, e0, e1);
 
@@ -276,8 +276,9 @@ class TriangleCountingSingle
 
           g_->edge_range(edge_m.tail_, jstart, jend);
 
-          local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
-          nst++;
+#pragma omp atomic capture
+          id = nst++;
+          local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[id % MAX_CUDA_STREAMS]);
         }
       }
     }
@@ -312,13 +313,13 @@ class TriangleCountingSingle
       }
       else
       {
-        GraphElem jstart, jend;
+        GraphElem jstart, jend, id;
         Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
         g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
 
-        local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
-#pragma omp atomic update 
-        nst++;
+#pragma omp atomic capture
+        id = nst++;
+        local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[id % MAX_CUDA_STREAMS]);
       }
     }
     
@@ -340,12 +341,12 @@ class TriangleCountingSingle
 #endif
     for (GraphElem i = 0; i < edge_mask_.size(); i++)
     {
-      GraphElem jstart, jend;
+      GraphElem jstart, jend, id;
       Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
       g_->edge_range(edge_m.tail_, jstart, jend);
-#pragma omp atomic update 
-      nst++;
-      local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+#pragma omp atomic capture
+      id = nst++;
+      local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[id % MAX_CUDA_STREAMS]);
     }
 #endif
 
