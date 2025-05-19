@@ -148,11 +148,13 @@ CudaCall(cudaDeviceSynchronize())
 }
 
 //define some cuda kernel configuration
+#define TILESIZE00      (64)
 #define TILESIZE01      (32)
 #define TILESIZE02      (16)
 #define TILESIZE03      (8)
 #define TILESIZE04      (4)
 #define TILESIZE05      (2)
+#define BLOCKDIM00      (32)
 #define BLOCKDIM01      (64)
 #define BLOCKDIM02      (128)
 #define BLOCKDIM03      (256)
@@ -198,6 +200,49 @@ bool edge_exists
  GraphElem e1, 
  GraphElem se, 
  const GraphElem* __restrict__ d_edge_list
+ );
+
+__device__ bool edge_exists_smem
+(
+ GraphElem s1,
+ GraphElem se, 
+ volatile GraphElem* s_edge_list
+ );
+
+__device__ void count_if_edge_exists
+(
+ GraphElem const& e0, 
+ GraphElem const& e1, 
+ GraphElem const& se, 
+ volatile GraphElem* s_edge_list,
+ GraphElem& t_count
+ );
+
+__device__ void count_if_edge_exists_smem
+(
+ GraphElem const& s1,
+ GraphElem const& se, 
+ volatile GraphElem* s_edge_list,
+ GraphElem& t_count
+ );
+
+__device__ GraphElem next_power_of_2
+(
+ GraphElem x
+);
+
+__device__ GraphElem midpoint
+(
+ GraphElem a, 
+ GraphElem b
+);
+
+__device__ void count_if_edge_exists_smem2
+(
+ GraphElem s1,
+ GraphElem se, 
+ volatile GraphElem* s_edge_list,
+ GraphElem& t_count
  );
 
 #if defined(USE_CUDA_CG)
@@ -269,6 +314,15 @@ void single_gpu_count_kernel
 );
 #endif
 #elif defined(SET_VERTEX_RANGE_SPLIT)
+ void single_gpu_count_masked
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+
  void single_gpu_count_masked
 (
  const GraphElem nedges,

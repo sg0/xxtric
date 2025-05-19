@@ -67,7 +67,7 @@ class TriangleCountingSingle
 #if defined(SET_VERTEX_RANGE)
       ,mnv_(-1), d_ebeg_(nullptr)
 #elif defined(SET_VERTEX_RANGE_SPLIT)
-      ,edge_mask_(0), d_edge_mask_(nullptr), v_edge_mask_(0) 
+      ,edge_mask_(0), d_edge_mask_(nullptr), v_edge_mask_(0)
 #endif
   {
     const GraphElem ne = g_->get_ne();
@@ -79,10 +79,15 @@ class TriangleCountingSingle
     cudaGetDeviceCount(&deviceCount);
     cudaSetDevice(device_id);
 
+#if defined(CUDA_SET_L2_CACHE_LIMIT)
     GraphWeight c_factor = 0.75;
     cudaGetDeviceProperties(&prop, device_id);
     size_t l2_size = MIN(int(prop.l2CacheSize * c_factor), prop.persistingL2CacheMaxSize);
     cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, l2_size);
+#endif
+#if defined(CUDA_SET_L2_CACHE_GRANULARITY)
+    cudaDeviceSetLimit(cudaLimitMaxL2FetchGranularity, 128);
+#endif
 
 #if defined(SET_VERTEX_RANGE)
     std::vector<GraphElem> new_erange(nv*3, -1), upd_erange;
@@ -92,12 +97,13 @@ class TriangleCountingSingle
 #if defined(SHOW_GRAPH_STATS)
     std::vector<GraphElem> erange(nv);
 #endif
+    const GraphElem avgdeg = (ne / nv);
 
 #if defined(USE_OPENMP)
 #if defined(SET_VERTEX_RANGE_SPLIT)
 #pragma omp declare reduction(merge : std::vector<GraphElem> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
 #pragma omp declare reduction(merge : std::vector<std::array<GraphElem, 3>> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
-#pragma omp parallel for reduction(merge: v_edge_mask_, edge_mask_) 
+#pragma omp parallel for firstprivate(avgdeg) reduction(merge: v_edge_mask_, edge_mask_) 
 #else
 #pragma omp parallel for  
 #endif
@@ -140,14 +146,19 @@ class TriangleCountingSingle
 #if defined(SORT_BY_NUM_EDGES)
           edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, (e1-m+1)});
 #else
+          //if ((e1-m+1) < avgdeg) // avg. degree
           //if ((e1-m+1) > nbrs_m) // e1-m > #nbrs(m)
+          /*
           if ((e1-m+1) < nbrs_m) // e1-m < #nbrs(m)
           {
             v_edge_mask_.push_back(e1);
             v_edge_mask_.push_back(m);
           }
           else
-            edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, -1});
+            edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, (e1-m+1)});
+          */  
+          edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, -1});
+          //edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, (e1-m+1)});
 #endif
         }
 #else
@@ -166,15 +177,36 @@ class TriangleCountingSingle
     CudaMemcpyHtoD(d_eind_, g_->edge_indices_.data(), (nv+1)*sizeof(GraphElem));
     CudaMemcpyHtoD(d_elst_, etails.data(), ne*sizeof(GraphElem));
 
-#if defined(SET_VERTEX_RANGE_SPLIT) && !defined(SORT_BY_NUM_EDGES)
+#if defined(SET_VERTEX_RANGE_SPLIT)
+#if defined(SORT_BY_NUM_EDGES)
+    std::sort(edge_mask_.begin(), edge_mask_.end(), 
+      [](auto a, auto b) { return a[2] > b[2]; });  
+
+    const GraphWeight factor = 0.999;
+    assert(factor <= 1.0);
+    const GraphElem cutoff_n = (GraphElem)((GraphWeight)edge_mask_.size()*factor);
+
+    for (GraphElem i = 0; i < cutoff_n; i++)
+    {
+      v_edge_mask_.push_back(edge_mask_[i][0]);
+      v_edge_mask_.push_back(edge_mask_[i][1]);
+    }
+
+    // copy x% of the smallest local edges in terms 
+    // of neighborhood size 
+    const GraphElem nedges = v_edge_mask_.size()/2;
+    CudaMalloc(d_edge_mask_, nedges*2*sizeof(GraphElem));
+    CudaMemcpyHtoD(d_edge_mask_, v_edge_mask_.data(), nedges*2*sizeof(GraphElem));
+#else
+    for (GraphElem i = 0; i < edge_mask_.size(); i++)
+    {
+      v_edge_mask_.push_back(edge_mask_[i][0]);
+      v_edge_mask_.push_back(edge_mask_[i][1]);
+    }
     const GraphElem nedges = v_edge_mask_.size()/2;
     CudaMalloc(d_edge_mask_, nedges*2*sizeof(GraphElem));
     CudaMemcpyHtoD(d_edge_mask_, v_edge_mask_.data(), nedges*2*sizeof(GraphElem));
 #endif
-
-#if defined(SET_VERTEX_RANGE_SPLIT) && defined(SORT_BY_NUM_EDGES)
-    std::sort(edge_mask_.begin(), edge_mask_.end(), 
-      [](auto a, auto b) { return a[2] > b[2]; });   
 #endif
 
 #if defined(SET_VERTEX_RANGE)
@@ -289,70 +321,52 @@ class TriangleCountingSingle
 #elif defined(SET_VERTEX_RANGE)
     single_gpu_count(mnv_, d_eind_, d_ebeg_, d_elst_, d_ntriangles_);
 #elif defined(SET_VERTEX_RANGE_SPLIT)
+#if defined(SORT_BY_NUM_EDGES)
     GraphElem nst = 0;
     cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
       CudaStreamCreateNB(streams[t]);
 
-#if defined(SORT_BY_NUM_EDGES)
-    const GraphWeight factor = 0.999;
-    assert(factor <= 1.0);
-    const GraphElem cutoff_n = (GraphElem)((GraphWeight)edge_mask_.size()*factor);
-
-    // multiple GPU kernels
-#if defined(USE_OPENMP)
-#pragma omp declare reduction(merge : std::vector<GraphElem> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
-#pragma omp parallel for firstprivate(cutoff_n) reduction(merge: v_edge_mask_) 
-#endif
-    for (GraphElem i = 0; i < edge_mask_.size(); i++)
-    {
-      if (i < cutoff_n)
-      {
-        v_edge_mask_.push_back(edge_mask_[i][0]);
-        v_edge_mask_.push_back(edge_mask_[i][1]);
-      }
-      else
-      {
-        GraphElem jstart, jend, id;
-        Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
-        g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
-
-#pragma omp atomic capture
-        id = nst++;
-        local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[id % MAX_CUDA_STREAMS]);
-      }
-    }
-    
-    // copy x% of the smallest local edges in terms 
-    // of neighborhood size 
-    const GraphElem nedges = v_edge_mask_.size()/2;
-    CudaMalloc(d_edge_mask_, nedges*2*sizeof(GraphElem));
-    CudaMemcpyHtoD(d_edge_mask_, v_edge_mask_.data(), nedges*2*sizeof(GraphElem));
-    
     // bulk GPU kernel
-    single_gpu_count_masked(nedges, d_edge_mask_, d_eind_, d_elst_, d_ntriangles_, streams[0]);
-#else
-    // grid-block over vertices
     single_gpu_count_masked(v_edge_mask_.size()/2, d_edge_mask_, d_eind_, d_elst_, d_ntriangles_, streams[0]);
 
-    // grid-block over edge-list
 #if defined(USE_OPENMP)
-#pragma omp parallel for
+#pragma omp parallel for 
+#endif
+    for (GraphElem i = v_edge_mask_.size()/2; i < edge_mask_.size(); i++)
+    {
+      GraphElem jstart, jend, id;
+      Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
+      g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
+
+#pragma omp atomic capture
+      id = nst++;
+      local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[id % MAX_CUDA_STREAMS]);
+    }
+    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
+      CudaStreamSynchronize(streams[t]);
+    delete []streams;
+#else
+    // grid-block over vertices
+    ///single_gpu_count_masked(v_edge_mask_.size()/2, d_edge_mask_, d_eind_, d_elst_, d_ntriangles_, streams[0]);
+    single_gpu_count_masked(v_edge_mask_.size()/2, d_edge_mask_, d_eind_, d_elst_, d_ntriangles_);
+    /*
+    // grid-block over edge-list
+    GraphElem jstart, jend, id;
+#if defined(USE_OPENMP)
+#pragma omp parallel for private(jstart, jend, id) default(shared)
 #endif
     for (GraphElem i = 0; i < edge_mask_.size(); i++)
     {
-      GraphElem jstart, jend, id;
       Edge const& edge_m = g_->get_edge(edge_mask_[i][1]);
       g_->edge_range(edge_m.tail_, jstart, jend);
 #pragma omp atomic capture
       id = nst++;
       local_count_gpu_inner(edge_mask_[i][1]+1, edge_mask_[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[id % MAX_CUDA_STREAMS]);
     }
+    */
 #endif
 
-    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
-      CudaStreamSynchronize(streams[t]);
-    delete []streams;
 #else
     single_gpu_count(nv, d_eind_, d_elst_, d_ntriangles_);
 #endif
