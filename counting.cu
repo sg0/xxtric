@@ -15,6 +15,7 @@ namespace cg = cooperative_groups;
 #include <cuda/barrier>
 #include <cuda/std/utility>
 using barrier = cuda::barrier<cuda::thread_scope_block>;
+//namespace cde = cuda::device::experimental;
 #endif
 #endif
 
@@ -667,7 +668,7 @@ inline __device__ GraphElem next_power_of_2
   return x;
 }
 
-inline __device__ GraphElem midpoint(GraphElem a, GraphElem b) { return (a + (b-a)/2); }
+inline __device__ GraphElem midpoint(GraphElem const& a, GraphElem const& b) { return (a + (b-a)/2); }
 
 #if 0
 inline __device__ void count_if_edge_exists_smem2
@@ -1558,7 +1559,7 @@ __global__
   static_assert(blocksize % tilesize == 0, "Block size must be a multiple of tile size");
 
   const GraphElem bid = blockIdx.x, step = gridDim.x;
-  const int WarpSize = tilesize, BlockSize = blocksize, SmemPerWarp = 400;
+  const int WarpSize = tilesize, BlockSize = blocksize, SmemPerWarp = 750;
   __shared__ GraphElem range[(BlockSize/WarpSize)*2];
   __shared__ alignas(16) GraphElem nbrs[(BlockSize/WarpSize)*SmemPerWarp];
 
@@ -1600,14 +1601,31 @@ __global__
     const GraphElem jstart = d_indices[edge_m];
     const GraphElem jend = d_indices[edge_m+1];
 
+#if defined(USE_ASYNC_MEMCPY)
+    //barrier::arrival_token tok;
+      //if (__any_sync(__activemask(), (d_edge_list[m+1] < d_edge_list[jstart]) || (d_edge_list[m+1] > d_edge_list[jend-1])))
+      //  continue;
+#endif
+
     for (GraphElem k = jstart; k < jend; k += SmemPerWarp)
     {
       const GraphElem smem_range = MIN(k + SmemPerWarp, jend);
       const GraphElem smem_count = smem_range - k;
 
 #if defined(USE_ASYNC_MEMCPY)
-        cuda::memcpy_async(warp, t_nbrs, &d_edge_list[k], cuda::aligned_size_t<sizeof(GraphElem)>(sizeof(GraphElem)*smem_count), *t_bar);
+
+
+      cuda::memcpy_async(warp, t_nbrs, &d_edge_list[k], cuda::aligned_size_t<sizeof(GraphElem)>(sizeof(GraphElem)*smem_count), *t_bar);
+      /*
+      if (warp_tid == 0)
+      {  
         //cuda::memcpy_async(warp, t_nbrs, &d_edge_list[k], sizeof(GraphElem)*smem_count, *t_bar);
+        cde::cp_async_bulk_global_to_shared(t_nbrs, &d_edge_list[k], cuda::aligned_size_t<sizeof(GraphElem)>(sizeof(GraphElem)*smem_count), *t_bar);
+        tok = t_bar->arrive();
+      } 
+      else
+        tok = t_bar->arrive();
+        */
 #else
       if (warp_tid == 0)
       {
@@ -1627,6 +1645,7 @@ __global__
       
 #if defined(USE_ASYNC_MEMCPY)
       t_bar->arrive_and_wait();
+      //t_bar->wait(std::move(tok));
 #else
       warp.sync();
 #endif

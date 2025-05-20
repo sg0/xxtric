@@ -233,8 +233,8 @@ __device__ GraphElem next_power_of_2
 
 __device__ GraphElem midpoint
 (
- GraphElem a, 
- GraphElem b
+ GraphElem const& a, 
+ GraphElem const& b
 );
 
 __device__ void count_if_edge_exists_smem2
