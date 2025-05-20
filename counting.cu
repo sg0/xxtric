@@ -3,7 +3,6 @@
 #include <cassert>
 #include <iostream>
 
-#if defined(USE_CUDA_CG)
 #include <cooperative_groups.h> 
 #include <cooperative_groups/memcpy_async.h>
 namespace cg = cooperative_groups;
@@ -16,7 +15,6 @@ namespace cg = cooperative_groups;
 #include <cuda/std/utility>
 using barrier = cuda::barrier<cuda::thread_scope_block>;
 //namespace cde = cuda::device::experimental;
-#endif
 #endif
 
 inline __device__ GraphElem lower_bound
@@ -65,8 +63,8 @@ inline __device__ void count_if_edge_exists
  )
 {
   GraphElem beg = e0, end = e1, mid = midpoint(beg, end);
-  const GraphElem const& first = d_edge_list[beg];
-  const GraphElem const& last = d_edge_list[end-1];
+  const GraphElem first = d_edge_list[beg];
+  const GraphElem last = d_edge_list[end-1];
 
   if (se == last || se == first)
   {
@@ -78,12 +76,12 @@ inline __device__ void count_if_edge_exists
   {
     while (end > beg) 
     { 
-      if (s_edge_list[mid] == se)
+      if (d_edge_list[mid] == se)
       {
         t_count += 1;
         return;
       }
-      else if (s_edge_list[mid] < se)
+      else if (d_edge_list[mid] < se)
         beg = mid + 1;
       else
         end = mid;
@@ -145,11 +143,7 @@ void single_gpu_count_masked
   GraphElem nblocks = (nedges + (blocksize/tilesize) - 1) / (blocksize/tilesize);
   nblocks = (nblocks > MAX_GRIDDIM) ? MAX_GRIDDIM : nblocks;
 
-#if defined(USE_CUDA_CG)
   single_gpu_count_masked_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(nedges, d_edge_mask, d_indices, d_edge_list, d_local_count);
-#else
-  single_gpu_count_masked_kernel<blocksize><<<nblocks, blocksize>>>(nedges, d_edge_mask, d_indices, d_edge_list, d_local_count);
-#endif
 }
 
 void single_gpu_count_masked
@@ -180,11 +174,7 @@ void single_gpu_count_masked
 
     cudaOccupancyMaxActiveBlocksPerMultiprocessor(
         &numBlocks,
-#if defined(USE_CUDA_CG)
         single_gpu_count_masked_kernel<tilesize, blocksize>,
-#else
-        single_gpu_count_masked_kernel<blocksize>,
-#endif
         blocksize,
         0);
 
