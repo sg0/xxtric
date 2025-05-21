@@ -189,6 +189,7 @@ void single_gpu_count_masked
   single_gpu_count_masked_kernel<tilesize, blocksize><<<nblocks, blocksize, 0, stream>>>(nedges, d_edge_mask, d_indices, d_edge_list, d_local_count);
 }
 
+#if defined(USE_ASYNC_MEMCPY)
 template <int tilesize, int blocksize>
 __global__  
  void single_gpu_count_masked_kernel
@@ -218,14 +219,12 @@ __global__
   GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
   GraphElem count = 0;
 
-#if defined(USE_ASYNC_MEMCPY)
 #pragma nv_diag_suppress static_var_with_dynamic_init
   __shared__ barrier bar[BlockSize/WarpSize];
   barrier* t_bar = &bar[block_tid/WarpSize];
   if (warp_tid == 0)
     init(t_bar, warp.size());
   warp.sync();
-#endif
 
   for (GraphElem i = i0; i < nedges; i += step*(BlockSize/WarpSize))
   {
@@ -245,11 +244,9 @@ __global__
     const GraphElem jstart = d_indices[edge_m];
     const GraphElem jend = d_indices[edge_m+1];
 
-#if defined(USE_ASYNC_MEMCPY)
     //barrier::arrival_token tok;
       //if (__any_sync(__activemask(), (d_edge_list[m+1] < d_edge_list[jstart]) || (d_edge_list[m+1] > d_edge_list[jend-1])))
       //  continue;
-#endif
 
     for (GraphElem k = jstart; k < jend; k += SmemPerWarp)
     {
@@ -298,6 +295,64 @@ __global__
 
       warp.sync(); 
     }
+  }
+
+#pragma unroll
+  for(int j = warp.size()/2; j > 0; j /= 2)
+    count += __shfl_down_sync(FULL_MASK, count, j);
+
+  if (warp_tid == 0)
+    atomicAdd((unsigned long long int*)d_local_count, count);
+}
+#elif defined(USE_STANDARD)
+template <int tilesize, int blocksize>
+__global__  
+ void single_gpu_count_masked_kernel
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+ )
+{
+  static_assert(blocksize % tilesize == 0, "Block size must be a multiple of tile size");
+
+  const GraphElem bid = blockIdx.x, step = gridDim.x;
+  const int WarpSize = tilesize, BlockSize = blocksize;
+  __shared__ GraphElem range[(BlockSize/WarpSize)*2];
+
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
+
+  const GraphElem block_tid = block.thread_rank();
+  const GraphElem warp_tid = warp.thread_rank();
+
+  GraphElem* t_range = &range[(block_tid/WarpSize)*2];
+  GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+  GraphElem count = 0;
+
+  for (GraphElem i = i0; i < nedges; i += step*(BlockSize/WarpSize))
+  {
+    if(warp_tid == 0)
+    {
+      const GraphElem id = 2*i;
+      t_range[0] = d_edge_mask[id];
+      t_range[1] = d_edge_mask[id+1];
+    }
+
+    warp.sync();
+
+    const GraphElem e_end = t_range[0];
+    const GraphElem m = t_range[1];
+
+    const GraphElem edge_m = d_edge_list[m];
+    const GraphElem jstart = d_indices[edge_m];
+    const GraphElem jend = d_indices[edge_m+1];
+
+#pragma unroll
+    for (GraphElem n = m+1+warp_tid; n < e_end; n += WarpSize)
+      count_if_edge_exists(jstart, jend, d_edge_list[n], d_edge_list, count);
   }
 
 #pragma unroll
@@ -410,6 +465,7 @@ void single_gpu_count_kernel
   if (warp_tid == 0)
     atomicAdd((unsigned long long int*)d_local_count, count);
 }
+#endif
 #endif
 
 void local_count_gpu_inner

@@ -231,7 +231,7 @@ class TriangleCounting
     CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*2*sizeof(GraphElem));
     
     // bulk GPU kernel
-    local_count_gpu_masked3(nedges, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[0]);
+    local_count_gpu_masked(nedges, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[0]);
     nst++;
 
     // remaining GPU kernels
@@ -268,7 +268,7 @@ class TriangleCounting
     CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*2*sizeof(GraphElem));
     
     // grid-block over vertices
-    local_count_gpu_masked3(nedges, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[nst % MAX_CUDA_STREAMS]);
+    local_count_gpu_masked(nedges, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[nst % MAX_CUDA_STREAMS]);
 #endif
     
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
