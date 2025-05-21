@@ -356,7 +356,7 @@ private:
     std::vector<GraphElem> v_edge_mask_;
 #endif
 };
-#else // MPI-based distributed-memory counting
+#else /// MPI-based distributed-memory counting
 class TriangleCounting
 {
   public:

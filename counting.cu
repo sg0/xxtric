@@ -6,7 +6,7 @@
 #include <cooperative_groups.h> 
 #include <cooperative_groups/memcpy_async.h>
 namespace cg = cooperative_groups;
-#if defined(USE_ASYNC_MEMCPY)
+//#if defined(USE_ASYNC_MEMCPY)
 //#if defined(__CUDA_MINIMUM_ARCH__) && __CUDA_MINIMUM_ARCH__ < 900
 //static_assert(false, "Insufficient CUDA Compute Capability: cuda::device::memcpy_async_tx is not available.");
 //#endif
@@ -15,7 +15,7 @@ namespace cg = cooperative_groups;
 #include <cuda/std/utility>
 using barrier = cuda::barrier<cuda::thread_scope_block>;
 //namespace cde = cuda::device::experimental;
-#endif
+//#endif
 
 inline __device__ GraphElem lower_bound
 (
@@ -53,6 +53,40 @@ inline __device__ GraphElem next_power_of_2
 
 inline __device__ GraphElem midpoint(GraphElem const& a, GraphElem const& b) { return (a + (b-a)/2); }
 
+inline __device__ bool edge_exists
+(
+ GraphElem e0, 
+ GraphElem e1, 
+ GraphElem se, 
+ const GraphElem* __restrict__ d_edge_list
+ )
+{
+  GraphElem beg = e0, end = e1, mid = midpoint(beg, end);
+  const GraphElem first = d_edge_list[beg];
+  const GraphElem last = d_edge_list[end-1];
+
+  if (se == last || se == first)
+    return true;
+
+  if (se > first && se < last)
+  {
+    while (end > beg) 
+    { 
+      if (d_edge_list[mid] == se)
+        return true;
+      else if (d_edge_list[mid] < se)
+        beg = mid + 1;
+      else
+        end = mid;
+
+      mid = midpoint(beg, end);
+    }
+  }
+
+  return false;
+}
+
+  
 inline __device__ void count_if_edge_exists
 (
  GraphElem e0, 
@@ -497,6 +531,7 @@ __device__ void unroll_last_warp(volatile GraphElem *sdata, GraphElem tid)
   sdata[tid] += sdata[tid + 1];
 }
 
+#if 0
 template <int tilesize, int blocksize>
 __global__
   void local_count_gpu_inner_kernel
@@ -536,6 +571,55 @@ __global__
 
       if (__any_sync(__activemask(), edge_k >= edge_i))
         break;
+    }
+  }
+
+ #pragma unroll
+  for(int j = warp.size()/2; j > 0; j /= 2)
+    count += __shfl_down_sync(FULL_MASK, count, j);
+
+  if (warp_tid == 0)
+    atomicAdd((unsigned long long int*)d_local_count, count);
+}
+#endif
+template <int tilesize, int blocksize>
+__global__
+  void local_count_gpu_inner_kernel
+(
+ const GraphElem start,
+ const GraphElem end,
+ const GraphElem jstart,
+ const GraphElem jend,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+ )
+{
+  static_assert(blocksize % tilesize == 0, "Block size must be a multiple of tile size");
+  
+  const GraphElem bid = blockIdx.x, step = gridDim.x;
+  const int WarpSize = tilesize, BlockSize = blocksize;
+
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
+
+  const GraphElem block_tid = block.thread_rank();
+  const GraphElem warp_tid = warp.thread_rank();
+
+  const GraphElem b0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+  GraphElem count = 0;
+
+  for (GraphElem i = start + b0; i < end; i += step*(BlockSize/WarpSize))
+  {
+    const GraphElem edge_i = d_edge_list[i];
+
+    for(GraphElem k = jstart + warp_tid; k < jend; k += WarpSize)
+    {
+      if (__any_sync(__activemask(), edge_exists(k, MIN(k + WarpSize, jend), edge_i, d_edge_list)))
+      {
+        if (warp_tid == 0)
+          count += 1;
+        break;
+      }
     }
   }
 

@@ -178,6 +178,14 @@ GraphElem lower_bound
  const GraphElem* __restrict__ d_parts
 );
 
+__device__ bool edge_exists
+(
+ GraphElem e0, 
+ GraphElem e1, 
+ GraphElem se, 
+ const GraphElem* __restrict__ d_edge_list
+ );
+
 __device__ void count_if_edge_exists
 (
  GraphElem e0, 
