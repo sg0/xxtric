@@ -143,14 +143,11 @@ class TriangleCounting
               continue;
 
             tup[1] = edge_n.tail_;
-#if defined(FAST_CHECK_EDGELIST)
-            if (fast_check_edgelist(tup))
-#else
-              if (check_edgelist(tup))
-#endif
-              {
-                tcount[i] += 1;
-              }
+
+            if (check_edgelist(tup))
+            {
+              tcount[i] += 1;
+            }
           }
         }
         else
@@ -210,12 +207,9 @@ class TriangleCounting
                   continue;
 
                 tup[1] = edge_n.tail_;
-#if defined(FAST_CHECK_EDGELIST)
-                if (fast_check_edgelist(tup))
-#else
+
                 if (check_edgelist(tup))
-#endif
-                    ntriangles_ += 1;
+                  ntriangles_ += 1;
             }
         }
         else
@@ -492,6 +486,7 @@ class TriangleCounting
       }
     }
 
+    /*
     inline bool check_edgelist(GraphElem (&tup)[2])
     {
       GraphElem e0, e1;
@@ -507,52 +502,39 @@ class TriangleCounting
       }
       return false;
     }
+    */
     
-    inline bool fast_check_edgelist(GraphElem (&tup)[2])
+    inline bool check_edgelist(GraphElem (&tup)[2])
     {
       GraphElem e0, e1;
       const GraphElem lv = g_->global_to_local(tup[0]);
-      
       g_->edge_range(lv, e0, e1);
-      Edge const& first_edge = g_->get_edge(e0);
-      Edge const& last_edge = g_->get_edge(e1 - 1);
+      GraphElem beg = e0, end = e1, mid = MID(beg, end);
+      Edge const& first = g_->get_edge(beg);
+      Edge const& last = g_->get_edge(end-1);
 
-      if (tup[1] == last_edge.tail_ || tup[1] == first_edge.tail_)
+      if (tup[1] == last.tail_ || tup[1] == first.tail_)
         return true;
-      
-      if (tup[1] > first_edge.tail_ && tup[1] < last_edge.tail_)
-      {
-        Edge const& mid_edge = g_->get_edge(MID(e0, e1));
 
-        if (tup[1] == mid_edge.tail_)
-          return true;
-        else if (tup[1] > mid_edge.tail_)
-        {
-          for (GraphElem e = MID(e0, e1) + 1; e < e1; e++)
-          {
-            Edge const& edge = g_->get_edge(e);
-            if (edge.tail_ > tup[1])
-              break;
-            if (tup[1] == edge.tail_)
-              return true;
-          }
-        }
-        else
-        {
-          for (GraphElem e = e0; e < MID(e0, e1); e++)
-          {
-            Edge const& edge = g_->get_edge(e);
-            if (edge.tail_ > tup[1])
-              break;
-            if (tup[1] == edge.tail_)
-              return true;
-          }
+      if (tup[1] > first.tail_ && tup[1] < last.tail_)
+      {
+        while (end > beg) 
+        { 
+          Edge const& midv = g_->get_edge(mid);
+          if (midv.tail_ == tup[1])
+            return true;
+          else if (midv.tail_ < tup[1])
+            beg = mid + 1;
+          else
+            end = mid;
+
+          mid = MID(beg, end);
         }
       }
-        
+
       return false;
     }
-
+    
 #if defined(USE_OPENMP_NESTED)
     inline bool check_edgelist_omp(GraphElem (&tup)[2])
     {
@@ -684,11 +666,7 @@ class TriangleCounting
                 if (check_edgelist_omp(tup))
                   ntriangles_ += 1;
 #else
-#if defined(FAST_CHECK_EDGELIST)
-                if (fast_check_edgelist(tup))
-#else
                 if (check_edgelist(tup))
-#endif
                   ntriangles_ += 1;
 #endif
 #endif
@@ -745,11 +723,7 @@ class TriangleCounting
 #if defined(RECV_MAP)
               check_rmap(tup);
 #else
-#if defined(FAST_CHECK_EDGELIST)
-                if (fast_check_edgelist(tup))
-#else
                 if (check_edgelist(tup))
-#endif
                   ntriangles_ += 1;
 #endif
               in_nghosts_ -= 1;
