@@ -162,7 +162,6 @@ inline __device__ void count_if_edge_exists_smem
   }
 }
  
-#if defined(SET_VERTEX_RANGE_SPLIT)
 void single_gpu_count_masked
 (
  const GraphElem nedges,
@@ -338,7 +337,7 @@ __global__
   if (warp_tid == 0)
     atomicAdd((unsigned long long int*)d_local_count, count);
 }
-#elif defined(USE_STANDARD)
+#else
 template <int tilesize, int blocksize>
 __global__  
  void single_gpu_count_masked_kernel
@@ -386,7 +385,8 @@ __global__
 
 #pragma unroll
     for (GraphElem n = m+1+warp_tid; n < e_end; n += WarpSize)
-      count_if_edge_exists(jstart, jend, d_edge_list[n], d_edge_list, count);
+      count_if_edge_exists(jstart + warp_tid, MIN(jstart + WarpSize, jend), d_edge_list[n], d_edge_list, count);
+      //count_if_edge_exists(jstart, jend, d_edge_list[n], d_edge_list, count);
   }
 
 #pragma unroll
@@ -396,7 +396,9 @@ __global__
   if (warp_tid == 0)
     atomicAdd((unsigned long long int*)d_local_count, count);
 }
-#else /// default single GPU kernel 
+#endif
+
+/// default single GPU kernel 
  void single_gpu_count
 (
  const GraphElem nv,
@@ -486,7 +488,7 @@ void single_gpu_count_kernel
 
         for (GraphElem n = m + 1; n < end; n++)
         {
-          if (i > edge_n)
+          if (i > d_edge_list[n])
             count_if_edge_exists(jstart, jend, d_edge_list[n], d_edge_list, count);
         }
       }
@@ -499,8 +501,6 @@ void single_gpu_count_kernel
   if (warp_tid == 0)
     atomicAdd((unsigned long long int*)d_local_count, count);
 }
-#endif
-#endif
 
 void local_count_gpu_inner
 (

@@ -55,23 +55,11 @@
 #include "utils.hpp"
 #include "graph.hpp"
 
-#if defined(USE_SHMEM_ORDER) || defined(USE_SHMEM_SIGNAL)
-#include <shmem.h>
-#endif
-
 #if defined(USE_OPENMP)
 #include <omp.h>
 #endif
 
-#if defined(USE_MPI_RMA_PASSIVE)
-#include "xxtricrma2.hpp"
-#elif defined(USE_MPI_RMA)
-#include "xxtricrma.hpp"
-#elif defined(USE_SHMEM_ORDER)
-#include "xxtricrma3.hpp"
-#elif defined(USE_SHMEM_SIGNAL)
-#include "xxtricrma4.hpp"
-#elif defined(USE_CUDA)
+#if defined(USE_CUDA)
 #include "xxtric-gpu.hpp"
 #elif defined(USE_CUDA_IPC)
 #include "xxtric-gpu-ipc.hpp"
@@ -114,10 +102,6 @@ int main(int argc, char *argv[])
   } else {
       MPI_Init(&argc, &argv);
   }
-#endif
-
-#if defined(USE_SHMEM_ORDER) || defined(USE_SHMEM_SIGNAL)
-  shmem_init();
 #endif
 
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
@@ -220,22 +204,10 @@ int main(int argc, char *argv[])
   if (me == 0) 
   {   
     double avg_t = (double)(t_tot/(double)nprocs);
-#if defined(USE_MPI_RMA)
-      std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using MPI RMA Fence) on " << nprocs << " processes: " 
-        << avg_t << ", " << t_min << ", " << t_max << std::endl;
-#elif defined(USE_MPI_RMA_PASSIVE)
-      std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using MPI RMA Passive) on " << nprocs << " processes: " 
-        << avg_t << ", " << t_min << ", " << t_max << std::endl;
-#elif defined(USE_SHMEM_ORDER)
-      std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using SHMEM ordered) on " << nprocs << " processes: " 
-        << avg_t << ", " << t_min << ", " << t_max << std::endl;
-#elif defined(USE_SHMEM_SIGNAL)
-      std::cout << "Avg/Min/Max execution time (secs.) for distributed counting (using SHMEM signal) on " << nprocs << " processes: " 
-        << avg_t << ", " << t_min << ", " << t_max << std::endl;
-#elif defined(USE_CUDA_IPC)
+#if defined(USE_CUDA_IPC)
       std::cout << "Performed counting (using CUDA IPC) on " << nprocs << " GPUs" << std::endl;
 #else
-      std::cout << "Avg/Min/Max execution time (secs.) for distributed counting on " << nprocs << " processes: " 
+      std::cout << "Avg/Min/Max execution time (secs.) for triangle counting on " << nprocs << " processes: " 
         << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #endif
 
@@ -251,10 +223,6 @@ int main(int argc, char *argv[])
 
   tr.clear(); 
   MPI_Barrier(MPI_COMM_WORLD);
-
-#if defined(USE_SHMEM_ORDER) || defined(USE_SHMEM_SIGNAL)
-  shmem_finalize();
-#endif
 
   MPI_Finalize();
 

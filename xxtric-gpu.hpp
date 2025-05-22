@@ -322,7 +322,6 @@ class TriangleCountingSingle
     }
     */
 #endif
-
 #else
     single_gpu_count(nv, d_eind_, d_elst_, d_ntriangles_);
 #endif

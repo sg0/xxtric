@@ -214,7 +214,6 @@ __device__ GraphElem midpoint
  GraphElem const& b
 );
 
-#if defined(SET_VERTEX_RANGE_SPLIT)
  void single_gpu_count_masked
 (
  const GraphElem nedges,
@@ -244,7 +243,7 @@ __global__
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
 );
-#else
+
 void single_gpu_count
 (
  const GraphElem nv,
@@ -262,7 +261,6 @@ void single_gpu_count_kernel
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
 );
-#endif
 
  void local_count_gpu_masked
 (
