@@ -1002,10 +1002,8 @@ __global__ void local_count_gpu_masked_ext_kernel
     const GraphElem m = t_range[1];
     const GraphElem base = t_range[2];
     
-    const GraphElem edge_m = d_edge_list_other[m];
-    const GraphElem base_edge_m = edge_m-base;
-    const GraphElem jstart = d_indices_other[base_edge_m];
-    const GraphElem jend = d_indices_other[base_edge_m+1];
+    const GraphElem jstart = d_indices_other[base];
+    const GraphElem jend = d_indices_other[base+1];
 
     for(GraphElem n = m + 1 + warp_tid; n < e_end; n += WarpSize)
       count_if_edge_exists(jstart, jend, d_edge_list[n], d_edge_list_other, count);
