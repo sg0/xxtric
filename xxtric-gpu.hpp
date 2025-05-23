@@ -131,8 +131,6 @@ class TriangleCountingSingle
 #if defined(SORT_BY_NUM_EDGES)
           edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, (e1-m+1)});
 #else
-          //if ((e1-m+1) < avgdeg) // avg. degree
-          //if ((e1-m+1) > nbrs_m) // e1-m > #nbrs(m)
           /*
           if ((e1-m+1) < nbrs_m) // e1-m < #nbrs(m)
           {
@@ -143,7 +141,6 @@ class TriangleCountingSingle
             edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, (e1-m+1)});
           */  
           edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, -1});
-          //edge_mask_.push_back(std::array<GraphElem, 3>{e1, m, (e1-m+1)});
 #endif
         }
 #endif

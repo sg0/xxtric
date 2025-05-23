@@ -208,6 +208,13 @@ __device__ GraphElem next_power_of_2
  GraphElem x
 );
 
+__device__ 
+void unroll_last_warp
+(
+ volatile GraphElem *sdata, 
+ GraphElem tid
+);
+
 __device__ GraphElem midpoint
 (
  GraphElem const& a, 
@@ -308,6 +315,8 @@ __global__
  GraphElem* __restrict__ d_local_count
  );
 
+/// CUDA IPC variants
+
 void local_count_gpu_ext
 (
  const GraphElem start,
@@ -333,13 +342,29 @@ __global__
  GraphElem* __restrict__ d_local_count
  );
 
-__device__ 
-void unroll_last_warp
+void local_count_gpu_masked_ext
 (
- volatile GraphElem *sdata, 
- GraphElem tid
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices_other,
+ const GraphElem* __restrict__ d_edge_list_other,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count,
+ cudaStream_t stream
 );
 
+template <int tilesize, int blocksize>
+__global__ void local_count_gpu_masked_ext_kernel
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices_other,
+ const GraphElem* __restrict__ d_edge_list_other,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+
+/// Recv-side kernels
  void local_count_gpu_recv
 (
  const GraphElem count,

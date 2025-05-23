@@ -71,8 +71,6 @@ class TriangleCounting
     erange_ = new GraphElem[nv*2]();
     std::vector<GraphElem> etails(lne);
 
-    double t0 = MPI_Wtime();
-
     // store edge ranges
     const GraphElem base = g_->get_base(rank_);
 
@@ -154,7 +152,11 @@ class TriangleCounting
         d_elst_handles, sizeof(cudaIpcMemHandle_t), MPI_BYTE, comm_);
    
     std::vector<GraphElem*> d_eind_nbr(size_, nullptr), d_elst_nbr(size_, nullptr);
-    
+#if defined(USE_SEPARATE_KERNELS)
+#else
+    std::vector<std::vector<std::array<GraphElem, 3>>> edge_mask_nbr(size_);
+#endif
+
     for (int t = 0; t < size_; t++)
     {    
       CudaIPCOpenMemHandle(d_eind_nbr[t], d_eind_handles[t]);
@@ -163,6 +165,8 @@ class TriangleCounting
 
     MPI_Barrier(comm_);
 
+    double t0 = MPI_Wtime();
+    
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, le0, le1;
@@ -189,14 +193,19 @@ class TriangleCounting
         {
           if (owner > rank_)
           {
-            const GraphElem base_m = edge_m.tail_-g_->get_base(owner);
+            const GraphElem base_m = edge_m.tail_-g_->get_base(owner);           
+#if defined(USE_SEPARATE_KERNELS)
             local_count_gpu_ext(m+1, e1, base_m, (GraphElem*)d_eind_nbr[owner], d_elst_, (GraphElem*)d_elst_nbr[owner], d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
             nst++;
+#else
+            edge_mask_nbr[owner].push_back(std::array<GraphElem, 3>{e1, m, base_m});
+#endif
           }
         }
       }
     }
 
+#if defined(USE_SEPARATE_KERNELS)
     for (int t = 0; t < size_; t++)
     {    
       CudaIPCCloseMemHandle(d_eind_nbr[t]);
@@ -210,12 +219,16 @@ class TriangleCounting
 
     d_eind_nbr.clear();
     d_elst_nbr.clear();
+#else
+    GraphElem** d_edge_mask_nbr = new GraphElem*[size_];
+    std::vector<std::vector<GraphElem>> v_edge_mask_nbr(size_);
+#endif
 
     GraphElem* d_edge_mask = nullptr;
     std::vector<GraphElem> v_edge_mask;
     nst = 0;
 
-#if defined(SORT_BY_NUM_EDGES)
+#if defined(SORT_BY_NUM_EDGES) && defined(USE_SEPARATE_KERNELS)
     std::sort(edge_mask.begin(), edge_mask.end(), 
       [](auto a, auto b) { return a[2] > b[2]; });   
    
@@ -245,30 +258,55 @@ class TriangleCounting
       nst++;
     }
 #else
-    for (GraphElem i = 0; i < edge_mask.size(); i++)
+    
+    // remote 
+    for (int p = 0; p < size_; p++)
     {
-      if ((edge_mask[i][0]-edge_mask[i][1]+1) > edge_mask[i][2]) // e1-m > #nbrs(m)
+      for (GraphElem i = 0; i < edge_mask_nbr[p].size(); i++)
       {
-        v_edge_mask.push_back(edge_mask[i][0]);
-        v_edge_mask.push_back(edge_mask[i][1]);
+          v_edge_mask_nbr[p].push_back(edge_mask_nbr[p][i][0]);
+          v_edge_mask_nbr[p].push_back(edge_mask_nbr[p][i][1]);
+          v_edge_mask_nbr[p].push_back(edge_mask_nbr[p][i][2]);
       }
-      else // grid-block over edge-list
-      {
-        GraphElem jstart, jend;
-        Edge const& edge_m = g_->get_edge(edge_mask[i][1]);
-        g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
-
-        local_count_gpu_inner(edge_mask[i][1]+1, edge_mask[i][0], jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
-        nst++;
-      }
+      const GraphElem nedges_rem = v_edge_mask_nbr[p].size()/3;
+      CudaMalloc(d_edge_mask_nbr[p], nedges_rem*3*sizeof(GraphElem));
+      CudaMemcpyHtoD(d_edge_mask_nbr[p], v_edge_mask_nbr[p].data(), nedges_rem*3*sizeof(GraphElem));
+    
+      local_count_gpu_masked_ext(nedges_rem, d_edge_mask_nbr[p], (GraphElem*)d_eind_nbr[p], (GraphElem*)d_elst_nbr[p], d_elst_, d_ntriangles_, streams[nst % MAX_CUDA_STREAMS]);
+      nst++;
     }
 
+    // local
+    for (GraphElem i = 0; i < edge_mask.size(); i++)
+    {
+      v_edge_mask.push_back(edge_mask[i][0]);
+      v_edge_mask.push_back(edge_mask[i][1]);
+    }
+    
     const GraphElem nedges = v_edge_mask.size()/2;
     CudaMalloc(d_edge_mask, nedges*2*sizeof(GraphElem));
     CudaMemcpyHtoD(d_edge_mask, v_edge_mask.data(), nedges*2*sizeof(GraphElem));
-    
+   
     // grid-block over vertices
     local_count_gpu_masked(nedges, base, d_edge_mask, d_eind_, d_elst_, d_ntriangles_, streams[nst % MAX_CUDA_STREAMS]);
+#endif
+
+#if defined(USE_SEPARATE_KERNELS)
+#else    
+    for (int t = 0; t < size_; t++)
+    {    
+      CudaIPCCloseMemHandle(d_eind_nbr[t]);
+      CudaIPCCloseMemHandle(d_elst_nbr[t]);
+
+      edge_mask_nbr[t].clear();
+      v_edge_mask_nbr[t].clear();
+    }
+        
+    d_eind_nbr.clear();
+    d_elst_nbr.clear();
+
+    edge_mask_nbr.clear();
+    v_edge_mask_nbr.clear();
 #endif
     
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
@@ -298,9 +336,6 @@ class TriangleCounting
         << ((double)(t_tot / (double)size_)) << ", " << t_min << ", " << t_max << std::endl;
     }
 
-    t0 = MPI_Wtime();
-
-    
 #if defined(DEBUG_PRINTF)
     if (rank_ == 0)
     {
@@ -312,8 +347,18 @@ class TriangleCounting
     
     delete []d_eind_handles;
     delete []d_elst_handles;
-    
+
     CudaFree(d_edge_mask);
+
+#if defined(USE_SEPARATE_KERNELS)
+#else    
+    for (int t = 0; t < size_; t++)
+    {    
+      if (d_edge_mask_nbr[t] != nullptr)
+        CudaFree(d_edge_mask_nbr[t]);
+    }
+    delete []d_edge_mask_nbr;
+#endif
   }
 
     ~TriangleCounting() {}
