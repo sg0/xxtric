@@ -279,7 +279,8 @@ class TriangleCounting
 
     nghosts_ = out_nghosts_ + in_nghosts_;
 
-    bufsize_ = ((nghosts_*2) < bufsize) ? (nghosts_*2) : bufsize;
+    ///bufsize_ = ((nghosts_*2) < bufsize) ? (nghosts_*2) : bufsize;
+    bufsize_ = ((nghosts_*2 < bufsize) || (bufsize == -1)) ? nghosts_*2 : bufsize;
 
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
 

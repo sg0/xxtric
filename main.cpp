@@ -183,9 +183,10 @@ int main(int argc, char *argv[])
 #elif defined(USE_SINGLE_DEVICE)
   TriangleCountingSingle tr(g);
 #else
+  /*
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;
-  
+  */
   TriangleCounting tr(g, bufferSize);
 #endif
 
