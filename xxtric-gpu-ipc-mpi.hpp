@@ -153,9 +153,9 @@ class TriangleCounting
     cudaIpcMemHandle_t local_elst_handle, local_eind_handle;
     cudaIpcMemHandle_t *d_eind_handles = new cudaIpcMemHandle_t[shm_size];
     cudaIpcMemHandle_t *d_elst_handles = new cudaIpcMemHandle_t[shm_size];
-    GraphElem *shm_nbrs = new GraphElem[shm_size];
     
-    MPI_Allgather(&rank_, 1, MPI_GRAPH_TYPE, shm_nbrs, 1, MPI_GRAPH_TYPE, shm_comm_);
+    int *shm_nbrs = new int[shm_size];
+    MPI_Allgather(&rank_, 1, MPI_INT, shm_nbrs, 1, MPI_INT, shm_comm_);
    
     CudaIPCGetMemHandle(d_eind_, local_eind_handle);
     CudaIPCGetMemHandle(d_elst_, local_elst_handle);
@@ -209,18 +209,19 @@ class TriangleCounting
         {
           if (owner > rank_)
           {
-            GraphElem *res = std::find(shm_nbrs, shm_nbrs + shm_size, owner);
+            int *res = std::find(shm_nbrs, shm_nbrs + shm_size, owner);
 
             if (res != (shm_nbrs + shm_size))
             {
               const GraphElem base_m = edge_m.tail_-g_->get_base(owner);           
-              const GraphElem idx = res - shm_nbrs;
+              const GraphElem idx = (GraphElem)(res - shm_nbrs);
               
               v_edge_mask_nbr[idx].push_back(e1);
               v_edge_mask_nbr[idx].push_back(m);
               v_edge_mask_nbr[idx].push_back(base_m);
-                
-              send_count[owner] = -1;
+               
+              if (send_count[owner] != -1) 
+                send_count[owner] = -1;
             }
             else
             {
@@ -242,7 +243,9 @@ class TriangleCounting
       }
     }
 
-    /// remote 
+    GraphElem local_nedges_rem = 0;
+
+    /// within the same node 
     for (int p = 0; p < shm_size; p++)
     {
       if (!v_edge_mask_nbr[p].empty())
@@ -253,6 +256,7 @@ class TriangleCounting
 
         local_count_gpu_masked_ext(nedges_rem, d_edge_mask_nbr[p], (GraphElem*)d_eind_nbr[p], (GraphElem*)d_elst_nbr[p], d_elst_, d_ntriangles_, streams[nst % MAX_CUDA_STREAMS]);
         nst++;
+        local_nedges_rem += nedges_rem;
       }
     }
 
@@ -288,17 +292,24 @@ class TriangleCounting
 
     double t1 = MPI_Wtime(); 
     double p_tot = t1 - t0, t_tot = 0.0, t_max = 0.0, t_min = 0.0;
+    GraphElem sum_nedges_rem = 0, min_nedges_rem = 0, max_nedges_rem = 0;
 
     MPI_Barrier(comm_);
     
     MPI_Reduce(&p_tot, &t_tot, 1, MPI_DOUBLE, MPI_SUM, 0, comm_);
     MPI_Reduce(&p_tot, &t_max, 1, MPI_DOUBLE, MPI_MAX, 0, comm_);
     MPI_Reduce(&p_tot, &t_min, 1, MPI_DOUBLE, MPI_MIN, 0, comm_);
-
+    
+    MPI_Reduce(&local_nedges_rem, &sum_nedges_rem, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
+    MPI_Reduce(&local_nedges_rem, &max_nedges_rem, 1, MPI_GRAPH_TYPE, MPI_MAX, 0, comm_);
+    MPI_Reduce(&local_nedges_rem, &min_nedges_rem, 1, MPI_GRAPH_TYPE, MPI_MIN, 0, comm_);
+    
     if (rank_ == 0) 
     {   
       std::cout << "Avg/Min/Max times for local counting during instantiation (secs.): " 
         << ((double)(t_tot / (double)size_)) << ", " << t_min << ", " << t_max << std::endl;
+      std::cout << "Avg/Min/Max node-local #remote vertices processed via IPC: " 
+        << (GraphElem)(sum_nedges_rem / size_) << ", " << min_nedges_rem << ", " << max_nedges_rem << std::endl;
     }
 
     t0 = MPI_Wtime();
@@ -324,7 +335,7 @@ class TriangleCounting
         in_nghosts_ += recv_count_[p];
       }
     }
-      
+
     pdegree_ = targets_.size();
     rdegree_ = sources_.size();
 
@@ -339,6 +350,19 @@ class TriangleCounting
     bufsize_ = ((nghosts_*2 < bufsize) || (bufsize == -1)) ? nghosts_*2 : bufsize;
 
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
+
+#if defined(CUDA_IPC_MPI_DEBUG_STRING)
+    std::cout << "Shared comm size: " << shm_size << std::endl;
+    for (int i = 0; i < shm_size; i++)
+    {
+      std::cout << "PE in shared memory node: " << shm_nbrs[i] << std::endl;
+    }
+    for (int i = 0; i < pdegree_; i++)
+    {
+      if (!tstatus_[targets_[i]])
+        std::cout << "PE in shared comm: " << targets_[i] << std::endl;
+    }
+#endif
 
     if (rank_ == 0)
       std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
@@ -376,6 +400,7 @@ class TriangleCounting
 #endif
     
     delete []send_count;
+    delete []shm_nbrs;
 
     CudaFree(d_edge_mask);
   }
