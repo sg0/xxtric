@@ -65,7 +65,11 @@ class TriangleCountingSingle
     TriangleCountingSingle(Graph* g): 
       g_(g), ntriangles_(0), d_eind_(nullptr), d_elst_(nullptr), d_ntriangles_(nullptr)
 #if defined(SET_VERTEX_RANGE_SPLIT)
-      ,edge_mask_(0), d_edge_mask_(nullptr), v_edge_mask_(0)
+#if defined(SORT_BY_NUM_EDGES)
+      ,edge_mask_(0)
+#else
+      ,d_edge_mask_(nullptr), v_edge_mask_(0)
+#endif
 #endif
   {
     const GraphElem ne = g_->get_ne();
@@ -97,7 +101,11 @@ class TriangleCountingSingle
 #if defined(SET_VERTEX_RANGE_SPLIT)
 #pragma omp declare reduction(merge : std::vector<GraphElem> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
 #pragma omp declare reduction(merge : std::vector<std::array<GraphElem, 3>> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+#if defined(SORT_BY_NUM_EDGES)
 #pragma omp parallel for firstprivate(avgdeg) reduction(merge: v_edge_mask_, edge_mask_) 
+#else
+#pragma omp parallel for firstprivate(avgdeg) reduction(merge: v_edge_mask_) 
+#endif
 #else
 #pragma omp parallel for  
 #endif
@@ -188,10 +196,9 @@ class TriangleCountingSingle
 #if defined(SHOW_GRAPH_STATS)
     void print_graph_stats(std::vector<GraphElem> const& vdeg, const GraphElem nv, const GraphElem ne)
     {
-      GraphElem sumdeg = 0, maxdeg = 0, sdevs = 0;
+      GraphElem sumdeg = 0, sdevs = 0;
       sumdeg = std::reduce(vdeg.begin(), vdeg.end());
-      auto max_deg = std::max_element(vdeg.begin(), vdeg.end());
-      maxdeg = *max_deg;
+      auto maxdeg = std::max_element(vdeg.begin(), vdeg.end());
 
       GraphWeight average  = (GraphWeight) sumdeg / nv;
        
@@ -210,7 +217,7 @@ class TriangleCountingSingle
       std::cout << "-------------------------------------------------------" << std::endl;
       std::cout << "Number of vertices: " << nv << std::endl;
       std::cout << "Number of edges: " << ne << std::endl;
-      std::cout << "Maximum number of edges: " << maxdeg << std::endl;
+      std::cout << "Maximum number of edges: " << *maxdeg << std::endl;
       std::cout << "Average number of edges: " << average << std::endl;
       std::cout << "Variance: " << var << std::endl;
       std::cout << "Standard deviation: " << stddev << std::endl;
