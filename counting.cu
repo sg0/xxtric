@@ -237,7 +237,7 @@ __global__
   static_assert(blocksize % tilesize == 0, "Block size must be a multiple of tile size");
 
   const GraphElem bid = blockIdx.x, step = gridDim.x;
-  const int WarpSize = tilesize, BlockSize = blocksize, SmemPerWarp = 750;
+  const int WarpSize = tilesize, BlockSize = blocksize, SmemPerWarp = 512;
   __shared__ GraphElem range[(BlockSize/WarpSize)*2];
   __shared__ alignas(16) GraphElem nbrs[(BlockSize/WarpSize)*SmemPerWarp];
 
