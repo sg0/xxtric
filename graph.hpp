@@ -625,15 +625,17 @@ class BinaryEdgeList
                 }
             }
 
-            mbins[0] = 0;
-
-            for (GraphElem n = 1; n < nprocs + 1; n++)
+            for (GraphElem n = 0; n < nprocs; n++)
             {
-                std::pair<GraphElem,GraphElem> const& ranges = brange[n-1];
+                std::pair<GraphElem,GraphElem> const& ranges = brange[n];
                 for (GraphElem k = ranges.first; k < ranges.second; k++)
-                    mbins[n] += ecount_idx[k];
+                    mbins[n+1]++;
             }
-
+            
+            // prefix sum to store indices 
+            for (int k = 1; k < nprocs+1; k++)
+                mbins[k] += mbins[k-1]; 
+ 
             nbins.clear();
             ecount_idx.clear();
             brange.clear();
