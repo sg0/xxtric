@@ -216,11 +216,7 @@ int main(int argc, char *argv[])
       std::cout << "Avg/Min/Max execution time (secs.) for triangle counting on " << nprocs << " processes: " 
         << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #endif
-
-#if defined(USE_CUDA_IPC) || defined(USE_SINGLE_DEVICE)
-#else
-    std::cout << "User initialized per-PE buffer count: " << bufferSize << std::endl;
-#endif    
+   
     std::cout << "Number of triangles: " << ntris << std::endl;
 
     std::cout << "TEPS: " << g->get_ne()/avg_t << std::endl;
