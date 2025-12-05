@@ -19,7 +19,9 @@ CXX = CC
 LDFLAGS += -L/opt/cray/pe/pmi/6.1.11/lib -lpmi -lpmi2 
 endif
 
-ENABLE_CUDA=1
+# module load cuda/12.6
+# if enabling CUDA
+ENABLE_CUDA=0
 ifeq ($(ENABLE_CUDA),1)
 NVCXX = nvcc
 MPI_PATH = /opt/cray/pe/mpich/8.1.28/ofi/nvidia/23.3
