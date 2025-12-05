@@ -560,6 +560,85 @@ class BinaryEdgeList
             ecount_idx.clear();
         }
 
+        void find_balanced_num_edges_exp(int nprocs, std::string file, std::vector<GraphElem>& mbins)
+        {
+            FILE *fp;
+            GraphElem nv, ne; // #vertices, #edges
+            std::vector<GraphElem> nbins(nprocs,0);
+            std::vector<std::pair<GraphElem,GraphElem>> brange;
+            
+            fp = fopen(file.c_str(), "rb");
+            if (fp == NULL) 
+            {
+                std::cout<< " Error opening file! " << std::endl;
+                return;
+            }
+
+            // read nv and ne
+            fread(&nv, sizeof(GraphElem), 1, fp);
+            fread(&ne, sizeof(GraphElem), 1, fp);
+          
+            assert(ne >= nprocs);
+            
+            // bin capacity
+            GraphElem nbcap = (ne / nprocs);
+            std::vector<GraphElem> ecount_idx(nv+1, 0);
+
+            fread(ecount_idx.data(), sizeof(GraphElem), nv+1, fp);
+            fclose(fp);
+
+            /// prefill
+            GraphElem k = 0, beg;
+            for (GraphElem n = 0; n < nprocs; n++)
+            {
+                beg = k;
+                while(1)
+                {
+                    if ((k == nv) || (nbins[n] >= nbcap))
+                    {
+                        brange.emplace_back(beg, k);
+                        break;
+                    }
+                    else
+                    {
+                        nbins[n] += (ecount_idx[k+1] - ecount_idx[k]);
+                        k++;
+                    }
+                }
+            }
+
+            /// readjust (if necessary)
+            for (GraphElem n = 1; n < nprocs; n++)
+            {
+                // shift 50% of bins from [n-1] to [n]
+                if (nbins[n] == 0)
+                {
+                    std::pair<GraphElem,GraphElem>& ranges = brange[n-1];
+                    std::pair<GraphElem,GraphElem>& this_ranges = brange[n];
+
+                    GraphElem past_end = ranges.second;
+                    GraphElem new_span = (ranges.second - ranges.first) / 2;
+
+                    ranges.second = ranges.first + new_span;
+                    this_ranges.first = ranges.second;
+                    this_ranges.second = past_end;
+                }
+            }
+
+            mbins[0] = 0;
+
+            for (GraphElem n = 1; n < nprocs + 1; n++)
+            {
+                std::pair<GraphElem,GraphElem> const& ranges = brange[n-1];
+                for (GraphElem k = ranges.first; k < ranges.second; k++)
+                    mbins[n] += ecount_idx[k];
+            }
+
+            nbins.clear();
+            ecount_idx.clear();
+            brange.clear();
+        }
+
         // read a file and return a graph
         // uses a balanced distribution
         // (approximately equal #edges per process) 
@@ -576,7 +655,11 @@ class BinaryEdgeList
             {
               if (!static_or_dyn)
               {
+#if defined(USE_EXP_BALANCED_DIST)
+                find_balanced_num_edges_exp(nprocs, file, mbins);
+#else
                 find_balanced_num_edges(nprocs, file, mbins);
+#endif
                 std::cout << "Trying to achieve equal edge distribution across processes." << std::endl;
               }
               else
