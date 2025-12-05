@@ -560,6 +560,7 @@ class BinaryEdgeList
             ecount_idx.clear();
         }
 
+#if defined(USE_EXP_BALANCED_DIST)
         void find_balanced_num_edges_exp(int nprocs, std::string file, std::vector<GraphElem>& mbins)
         {
             FILE *fp;
@@ -640,6 +641,7 @@ class BinaryEdgeList
             ecount_idx.clear();
             brange.clear();
         }
+#endif
 
         // read a file and return a graph
         // uses a balanced distribution
