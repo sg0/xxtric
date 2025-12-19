@@ -56,6 +56,13 @@
 #define TAG_DATA  (100)
 #endif
 
+#if defined(COMPRESS_COMM_BUFFERS)
+#ifndef TAG_CMPR
+#define TAG_CMPR  (200)
+#endif
+#endif
+
+
 class TriangleCounting
 {
   public:
@@ -68,6 +75,9 @@ class TriangleCounting
       recv_count_(nullptr), rindex_(0), rdegree_(0)
 #if defined(RECV_MAP)
       , rmap_({})
+#endif
+#if defined(COMPRESS_COMM_BUFFERS)
+     , cbuf_(nullptr), dbuf_(nullptr)
 #endif
   {
     comm_ = g_->get_comm();
@@ -271,6 +281,7 @@ class TriangleCounting
     pdegree_ = targets_.size();
     rdegree_ = sources_.size();
 
+
     for (int i = 0; i < pdegree_; i++)
       pindex_.insert({targets_[i], i});
 
@@ -303,6 +314,17 @@ class TriangleCounting
     std::fill(stat_, stat_ + pdegree_, '0');
     
     std::fill(rreq_, rreq_ + rdegree_, MPI_REQUEST_NULL);
+
+#if defined(COMPRESS_COMM_BUFFERS)
+   cbuf_ = new Compress<GraphElem>[pdegree_]; 
+   dbuf_ = new Decompress<GraphElem>[rdegree_];
+
+   for (GraphElem p = 0; p < pdegree_; p++)
+       cbuf_[p].set(bufsize_);
+
+   for (GraphElem r = 0; r < rdegree_; r++)
+       dbuf_[r].set(bufsize_, &rbuf_[r*bufsize_]);
+#endif
 
     MPI_Barrier(comm_);
 
@@ -338,6 +360,11 @@ class TriangleCounting
       rmap_.clear();
 #endif
 
+#if defined(COMPRESS_COMM_BUFFERS)
+     delete [] cbuf_;
+     delete [] dbuf_;
+#endif
+
       pindex_.clear();
       targets_.clear();
       rindex_.clear();
@@ -348,8 +375,23 @@ class TriangleCounting
     {
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
+#if defined(COMPRESS_COMM_BUFFERS)
+          if (sbuf_ctr_[pindex_[owner]] == bufsize_)
+          {
+              char *buf = nullptr;
+              const GraphElem count = cbuf_[pindex_[owner]].compress(buf, &sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]]);
+
+              MPI_Isend(&buf, count, MPI_CHAR, owner, TAG_CMPR, comm_, &sreq_[pindex_[owner]]);
+          }
+          else
+          {
+              MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
+                      MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+          }
+#else
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+#endif
         stat_[pindex_[owner]] = '1'; 
       }
     }
@@ -380,6 +422,30 @@ class TriangleCounting
       for (int p = 0; p < rdegree_; p++)
         nbrecv(sources_[p]);
     }
+
+#if defined(COMPRESS_COMM_BUFFERS)
+    inline void nbcrecv()
+    {
+#if defined(USE_OPENMP) && !defined(RECV_MAP) 
+#pragma omp parallel for default(shared)
+#endif
+      for (int p = 0; p < rdegree_; p++)
+        nbcrecv(sources_[p]);
+    }
+
+    inline void nbcrecv(int source)
+    {
+        if (recv_count_[source] > 0)
+        {
+            char* rbuf = nullptr;
+            GraphElem count;
+
+            dbuf_[rindex_[source]].get((size_t&)count, rbuf);
+
+            MPI_Irecv(&rbuf, count, MPI_CHAR, source, MPI_ANY_TAG, comm_, &rreq_[rindex_[source]]);
+        }
+    }
+#endif
     
     inline void lookup_edges()
     {
@@ -634,10 +700,23 @@ class TriangleCounting
 
           const int source = status.MPI_SOURCE;
 
+#if defined(COMPRESS_COMM_BUFFERS)
+          const int tag = status.MPI_TAG;
+          if (tag == TAG_CMPR)
+              MPI_Get_count(&status, MPI_CHAR, &count);
+          else
+              MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
+#else
           MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
-
+#endif
           if (source != MPI_ANY_SOURCE)
           {
+#if defined(COMPRESS_COMM_BUFFERS)
+          if (tag == TAG_CMPR)
+              dbuf_[p].decompress(count);
+          else
+              std::memcpy((rbuf_ + p*bufsize_*sizeof(GraphElem)), dbuf_[p].get_dptr(), count*sizeof(GraphElem));
+#endif
             for (GraphElem k = 0; k < count;)
             {
               if (rbuf_[p*bufsize_+k] == -1)
@@ -679,8 +758,11 @@ class TriangleCounting
               prev = k;
             }
 
+#if defined(COMPRESS_COMM_BUFFERS)
+          nbcrecv(source);
+#else
            nbrecv(source);
-          
+#endif          
           }
         }
       }
@@ -695,10 +777,25 @@ class TriangleCounting
 
         int count = 0;
         const int source = rstatuses[i].MPI_SOURCE;
+ 
+#if defined(COMPRESS_COMM_BUFFERS)
+          const int tag = rstatuses[i].MPI_TAG;
+          if (tag == TAG_CMPR)
+              MPI_Get_count(&rstatuses[i], MPI_CHAR, &count);
+          else
+              MPI_Get_count(&rstatuses[i], MPI_GRAPH_TYPE, &count);
+#else
         MPI_Get_count(&rstatuses[i], MPI_GRAPH_TYPE, &count);
+#endif       
 
         if (source != MPI_ANY_SOURCE)
         {
+#if defined(COMPRESS_COMM_BUFFERS)
+          if (tag == TAG_CMPR)
+              dbuf_[idx].decompress(count);
+          else
+              std::memcpy((rbuf_ + idx*bufsize_*sizeof(GraphElem)), dbuf_[idx].get_dptr(), count*sizeof(GraphElem));
+#endif
           for (GraphElem k = 0; k < count;)
           {
             if (rbuf_[idx*bufsize_+k] == -1)
@@ -735,8 +832,11 @@ class TriangleCounting
             prev = k;
           }
 
+#if defined(COMPRESS_COMM_BUFFERS)
+          nbcrecv(source);
+#else
           nbrecv(source);
-
+#endif
         }
       }
 #endif
@@ -758,8 +858,12 @@ class TriangleCounting
       MPI_Status* rstatuses = new MPI_Status[rdegree_]();
 #endif      
       int over = -1;
-      
+ 
+#if defined(COMPRESS_COMM_BUFFERS)
+      nbcrecv();
+#else     
       nbrecv();
+#endif
 
 #if defined(USE_ALLREDUCE_FOR_EXIT)
       while(1)
@@ -832,7 +936,12 @@ class TriangleCounting
     GraphElem *sbuf_, *rbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     MPI_Request *sreq_, *rreq_;
     char *stat_;
-    
+   
+#if defined(COMPRESS_COMM_BUFFERS)
+   Compress<GraphElem> *cbuf_;
+   Decompress<GraphElem> *dbuf_;
+#endif
+
     std::vector<int> targets_, sources_;
     int rank_, size_;
     std::unordered_map<int, int> pindex_, rindex_; 
