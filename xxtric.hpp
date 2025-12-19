@@ -713,9 +713,9 @@ class TriangleCounting
           {
 #if defined(COMPRESS_COMM_BUFFERS)
           if (tag == TAG_CMPR)
-              dbuf_[p].decompress(count);
+              dbuf_[p].decompress();
           else
-              std::memcpy((rbuf_ + p*bufsize_*sizeof(GraphElem)), dbuf_[p].get_dptr(), count*sizeof(GraphElem));
+              std::memcpy(rbuf_ + p*bufsize_, dbuf_[p].get_dptr(), count*sizeof(GraphElem));
 #endif
             for (GraphElem k = 0; k < count;)
             {
@@ -792,9 +792,9 @@ class TriangleCounting
         {
 #if defined(COMPRESS_COMM_BUFFERS)
           if (tag == TAG_CMPR)
-              dbuf_[idx].decompress(count);
+              dbuf_[idx].decompress();
           else
-              std::memcpy((rbuf_ + idx*bufsize_*sizeof(GraphElem)), dbuf_[idx].get_dptr(), count*sizeof(GraphElem));
+              std::memcpy(rbuf_ + idx*bufsize_, dbuf_[idx].get_dptr(), count*sizeof(GraphElem));
 #endif
           for (GraphElem k = 0; k < count;)
           {
