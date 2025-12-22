@@ -298,10 +298,10 @@ class Decompress
             assert((dsize_ >= 0) && (dsize_ == size_));
         }
 
-        void get(size_t& count, char* buf) 
+        char* get(size_t& size) 
         { 
-            buf = buf_;
-            count = ubsize_;
+            size = ubsize_;
+            return buf_;
         }
         
         char* get_dptr() { return buf_; }

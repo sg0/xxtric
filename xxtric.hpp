@@ -381,12 +381,12 @@ class TriangleCounting
               char *buf = nullptr;
               const GraphElem count = cbuf_[pindex_[owner]].compress(buf, &sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]]);
 
-              MPI_Isend(&buf, count, MPI_CHAR, owner, TAG_CMPR, comm_, &sreq_[pindex_[owner]]);
+              MPI_Isend(&buf, count, MPI_BYTE, owner, TAG_CMPR, comm_, &sreq_[pindex_[owner]]);
           }
           else
           {
-              MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
-                      MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+              MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]]*sizeof(GraphElem), 
+                      MPI_BYTE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
           }
 #else
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
@@ -437,12 +437,11 @@ class TriangleCounting
     {
         if (recv_count_[source] > 0)
         {
-            char* rbuf = nullptr;
             GraphElem count;
 
-            dbuf_[rindex_[source]].get((size_t&)count, rbuf);
+            char* rbuf = dbuf_[rindex_[source]].get((size_t&)count);
 
-            MPI_Irecv(&rbuf, count, MPI_CHAR, source, MPI_ANY_TAG, comm_, &rreq_[rindex_[source]]);
+            MPI_Irecv(&rbuf, count, MPI_BYTE, source, MPI_ANY_TAG, comm_, &rreq_[rindex_[source]]);
         }
     }
 #endif
@@ -699,11 +698,12 @@ class TriangleCounting
           int count = 0;
 
           const int source = status.MPI_SOURCE;
+          GraphElem* rbuf = nullptr;
 
 #if defined(COMPRESS_COMM_BUFFERS)
           const int tag = status.MPI_TAG;
           if (tag == TAG_CMPR)
-              MPI_Get_count(&status, MPI_CHAR, &count);
+              MPI_Get_count(&status, MPI_BYTE, &count);
           else
               MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
 #else
@@ -713,31 +713,36 @@ class TriangleCounting
           {
 #if defined(COMPRESS_COMM_BUFFERS)
           if (tag == TAG_CMPR)
+          {
+              rbuf = &rbuf_[p*bufsize_];
               dbuf_[p].decompress();
+          }
           else
-              std::memcpy(rbuf_ + p*bufsize_, dbuf_[p].get_dptr(), count*sizeof(GraphElem));
+              rbuf = (GraphElem*)dbuf_[p].get_dptr();
+#else
+          rbuf = &rbuf_[p*bufsize_];
 #endif
             for (GraphElem k = 0; k < count;)
             {
-              if (rbuf_[p*bufsize_+k] == -1)
+              if (rbuf[k] == -1)
               {
                 k += 1;
                 prev = k;
                 continue;
               }
 
-              tup[0] = rbuf_[p*bufsize_+k];
+              tup[0] = rbuf[k];
               GraphElem curr_count = 0;
 
               for (GraphElem m = k + 1; m < count; m++)
               {
-                if (rbuf_[p*bufsize_+m] == -1)
+                if (rbuf[m] == -1)
                 {
                   curr_count = m + 1;
                   break;
                 }
 
-                tup[1] = rbuf_[p*bufsize_+m];
+                tup[1] = rbuf[m];
 
 #if defined(RECV_MAP)
                 check_rmap(tup);
@@ -759,7 +764,7 @@ class TriangleCounting
             }
 
 #if defined(COMPRESS_COMM_BUFFERS)
-          nbcrecv(source);
+           nbcrecv(source);
 #else
            nbrecv(source);
 #endif          
@@ -777,11 +782,12 @@ class TriangleCounting
 
         int count = 0;
         const int source = rstatuses[i].MPI_SOURCE;
- 
+        GraphElem* rbuf = nullptr;
+
 #if defined(COMPRESS_COMM_BUFFERS)
           const int tag = rstatuses[i].MPI_TAG;
           if (tag == TAG_CMPR)
-              MPI_Get_count(&rstatuses[i], MPI_CHAR, &count);
+              MPI_Get_count(&rstatuses[i], MPI_BYTE, &count);
           else
               MPI_Get_count(&rstatuses[i], MPI_GRAPH_TYPE, &count);
 #else
@@ -792,31 +798,36 @@ class TriangleCounting
         {
 #if defined(COMPRESS_COMM_BUFFERS)
           if (tag == TAG_CMPR)
+          {
+              rbuf = &rbuf_[idx*bufsize_];
               dbuf_[idx].decompress();
+          }
           else
-              std::memcpy(rbuf_ + idx*bufsize_, dbuf_[idx].get_dptr(), count*sizeof(GraphElem));
+              rbuf = (GraphElem*)dbuf_[idx].get_dptr();
+#else
+          rbuf = &rbuf_[idx*bufsize_];
 #endif
           for (GraphElem k = 0; k < count;)
           {
-            if (rbuf_[idx*bufsize_+k] == -1)
+            if (rbuf[k] == -1)
             {
               k += 1;
               prev = k;
               continue;
             }
 
-            tup[0] = rbuf_[idx*bufsize_+k];
+            tup[0] = rbuf[k];
             GraphElem curr_count = 0;
 
             for (GraphElem m = k + 1; m < count; m++)
             {
-              if (rbuf_[idx*bufsize_+m] == -1)
+              if (rbuf[m] == -1)
               {
                 curr_count = m + 1;
                 break;
               }
 
-              tup[1] = rbuf_[idx*bufsize_+m];
+              tup[1] = rbuf[m];
 
 #if defined(RECV_MAP)
               check_rmap(tup);
