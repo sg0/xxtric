@@ -256,21 +256,21 @@ class Compress
         char* compress()
         { 
             csize_ = LZ4_compress_default(reinterpret_cast<const char*>(cbuf_), buf_, size_, ubsize_); 
-            assert(csize_ >= 0);
+            assert(csize_ > 0);
             return buf_;
         }
         
         char* compress(T* ptr)
         { 
             csize_ = LZ4_compress_default(reinterpret_cast<const char*>(ptr), buf_, size_, ubsize_); 
-            assert(csize_ >= 0);
+            assert(csize_ > 0);
             return buf_;
         }
 
         size_t compress(char* buf, T* ptr, size_t count)
         { 
             csize_ = LZ4_compress_default(reinterpret_cast<const char*>(ptr), buf_, count, compress_ub(count*sizeof(T))); 
-            assert(csize_ >= 0);
+            assert(csize_ > 0);
             buf = buf_;
             return csize_;
         }

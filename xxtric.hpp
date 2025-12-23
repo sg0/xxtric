@@ -904,7 +904,30 @@ class TriangleCounting
       GraphElem ttc = 0, ltc = ntriangles_;
       MPI_Barrier(comm_);
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
-      
+ 
+#if defined(COMPRESS_COMM_BUFFERS)
+	  const int compressed_size = cbuf_[pdegree_-1].compress_sz();
+      if (compressed_size > 0)
+      {
+          const size_t input_size = bufsize_*sizeof(GraphElem);
+          double compression_ratio = static_cast<double>(input_size) / compressed_size;
+          double ratio_percentage = (static_cast<double>(compressed_size) / input_size) * 100.0;
+          double space_saved_percentage = (1.0 - static_cast<double>(compressed_size) / input_size) * 100.0;
+
+          if (rank_ == 0)
+          {
+              std::cout << "-------Per-PE compression statistics-------"<< std::endl;
+              std::cout << "Original Size: " << input_size << " bytes" << std::endl;
+              std::cout << "Compressed Size: " << compressed_size << " bytes" << std::endl;
+              std::cout << "Compression Ratio (Original/Compressed): " << compression_ratio << " ("
+                  << input_size / compressed_size << ":1 approx)" << std::endl;
+              std::cout << "Compressed size is " << ratio_percentage << "% of original size." << std::endl;
+              std::cout << "Space saved: " << space_saved_percentage << "%" << std::endl; 
+              std::cout << "-------Per-PE compression statistics-------"<< std::endl;
+          }
+      }
+#endif
+
       delete []inds;
 #if defined(USE_OPENMP)
 #else
