@@ -223,9 +223,9 @@ template <typename T>
 class Compress
 {
     public:
-        Compress(): size_(-1), csize_(-1), buf_(nullptr) {}
+        Compress(): size_(-1), csize_(-1), buf_(nullptr), cbuf_(nullptr) {}
         Compress(size_t count): 
-            size_(count*sizeof(T)), csize_(-1), buf_(nullptr)
+            size_(count*sizeof(T)), csize_(-1), buf_(nullptr), cbuf_(nullptr)
         { 
             ubsize_ = compress_ub(count*sizeof(T));
             buf_ = new char[ubsize_]; 
@@ -243,7 +243,23 @@ class Compress
             ubsize_ = compress_ub(size_);
             buf_ = new char[ubsize_]; 
         }
-
+        
+        void set(size_t count, T* cptr)
+        {
+            cbuf_ = cptr;
+            size_ = count*sizeof(T);
+            
+            ubsize_ = compress_ub(size_);
+            buf_ = new char[ubsize_]; 
+        }
+        
+        char* compress()
+        { 
+            csize_ = LZ4_compress_default(reinterpret_cast<const char*>(cbuf_), buf_, size_, ubsize_); 
+            assert(csize_ >= 0);
+            return buf_;
+        }
+        
         char* compress(T* ptr)
         { 
             csize_ = LZ4_compress_default(reinterpret_cast<const char*>(ptr), buf_, size_, ubsize_); 
@@ -259,6 +275,7 @@ class Compress
             return csize_;
         }
     private:
+        T* cbuf_;
         char* buf_;
         size_t ubsize_, size_, csize_;
 };

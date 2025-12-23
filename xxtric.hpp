@@ -320,7 +320,7 @@ class TriangleCounting
    dbuf_ = new Decompress<GraphElem>[rdegree_];
 
    for (GraphElem p = 0; p < pdegree_; p++)
-       cbuf_[p].set(bufsize_);
+       cbuf_[p].set(bufsize_, &sbuf_[p*bufsize_]);
 
    for (GraphElem r = 0; r < rdegree_; r++)
        dbuf_[r].set(bufsize_, &rbuf_[r*bufsize_]);
@@ -379,7 +379,7 @@ class TriangleCounting
           if (sbuf_ctr_[pindex_[owner]] == bufsize_)
           {
               const GraphElem count = cbuf_[pindex_[owner]].compress_ub();
-              char *buf = cbuf_[pindex_[owner]].compress(&sbuf_[pindex_[owner]*bufsize_]);
+              char *buf = cbuf_[pindex_[owner]].compress();
 
               MPI_Isend(&buf, count, MPI_BYTE, owner, TAG_CMPR, comm_, &sreq_[pindex_[owner]]);
           }
