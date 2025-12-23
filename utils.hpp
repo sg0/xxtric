@@ -306,13 +306,13 @@ class Decompress
         void decompress()
         {
             dsize_ = LZ4_decompress_safe(buf_, reinterpret_cast<char*>(dbuf_), ubsize_, size_);
-            assert((dsize_ >= 0) && (dsize_ == size_));
+            assert((dsize_ > 0) && (dsize_ == size_));
         }       
         
         void decompress(const GraphElem csize)
         {
             dsize_ = LZ4_decompress_safe(buf_, reinterpret_cast<char*>(dbuf_), csize, size_);
-            assert((dsize_ >= 0) && (dsize_ == size_));
+            assert((dsize_ > 0) && (dsize_ == size_));
         }
 
         char* get(size_t& size) 
