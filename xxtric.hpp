@@ -378,8 +378,8 @@ class TriangleCounting
 #if defined(COMPRESS_COMM_BUFFERS)
           if (sbuf_ctr_[pindex_[owner]] == bufsize_)
           {
-              char *buf = nullptr;
-              const GraphElem count = cbuf_[pindex_[owner]].compress(buf, &sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]]);
+              const GraphElem count = cbuf_[pindex_[owner]].compress_ub();
+              char *buf = cbuf_[pindex_[owner]].compress(&sbuf_[pindex_[owner]*bufsize_]);
 
               MPI_Isend(&buf, count, MPI_BYTE, owner, TAG_CMPR, comm_, &sreq_[pindex_[owner]]);
           }
