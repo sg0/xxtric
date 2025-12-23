@@ -378,10 +378,8 @@ class TriangleCounting
 #if defined(COMPRESS_COMM_BUFFERS)
           if (sbuf_ctr_[pindex_[owner]] == bufsize_)
           {
-              const GraphElem count = cbuf_[pindex_[owner]].compress_ub();
-              char *buf = cbuf_[pindex_[owner]].compress();
-
-              MPI_Isend(&buf, count, MPI_BYTE, owner, TAG_CMPR, comm_, &sreq_[pindex_[owner]]);
+              MPI_Isend(cbuf_[pindex_[owner]].compress(), cbuf_[pindex_[owner]].compress_ub(), 
+                      MPI_BYTE, owner, TAG_CMPR, comm_, &sreq_[pindex_[owner]]);
           }
           else
           {
@@ -409,8 +407,13 @@ class TriangleCounting
     {
         if (recv_count_[source] > 0)
         {
-          MPI_Irecv(&rbuf_[rindex_[source]*bufsize_], bufsize_, 
-              MPI_GRAPH_TYPE, source, TAG_DATA, comm_, &rreq_[rindex_[source]]);
+#if defined(COMPRESS_COMM_BUFFERS)
+            MPI_Irecv(dbuf_[rindex_[source]].get_dptr(), dbuf_[rindex_[source]].compress_ub(), 
+                    MPI_BYTE, source, MPI_ANY_TAG, comm_, &rreq_[rindex_[source]]);
+#else
+            MPI_Irecv(&rbuf_[rindex_[source]*bufsize_], bufsize_, 
+                    MPI_GRAPH_TYPE, source, TAG_DATA, comm_, &rreq_[rindex_[source]]);
+#endif
         }
     }
 
@@ -423,28 +426,6 @@ class TriangleCounting
         nbrecv(sources_[p]);
     }
 
-#if defined(COMPRESS_COMM_BUFFERS)
-    inline void nbcrecv()
-    {
-#if defined(USE_OPENMP) && !defined(RECV_MAP) 
-#pragma omp parallel for default(shared)
-#endif
-      for (int p = 0; p < rdegree_; p++)
-        nbcrecv(sources_[p]);
-    }
-
-    inline void nbcrecv(int source)
-    {
-        if (recv_count_[source] > 0)
-        {
-            const GraphElem count = dbuf_[rindex_[source]].compress_ub();
-            char* rbuf = dbuf_[rindex_[source]].get_dptr();
-
-            MPI_Irecv(&rbuf, count, MPI_BYTE, source, MPI_ANY_TAG, comm_, &rreq_[rindex_[source]]);
-        }
-    }
-#endif
-    
     inline void lookup_edges()
     {
       if (pdegree_ == 0)
@@ -765,11 +746,7 @@ class TriangleCounting
               prev = k;
             }
 
-#if defined(COMPRESS_COMM_BUFFERS)
-           nbcrecv(source);
-#else
            nbrecv(source);
-#endif          
           }
         }
       }
@@ -848,11 +825,7 @@ class TriangleCounting
             prev = k;
           }
 
-#if defined(COMPRESS_COMM_BUFFERS)
-          nbcrecv(source);
-#else
           nbrecv(source);
-#endif
         }
       }
 #endif
@@ -875,11 +848,7 @@ class TriangleCounting
 #endif      
       int over = -1;
  
-#if defined(COMPRESS_COMM_BUFFERS)
-      nbcrecv();
-#else     
       nbrecv();
-#endif
 
 #if defined(USE_ALLREDUCE_FOR_EXIT)
       while(1)
