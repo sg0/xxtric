@@ -437,9 +437,8 @@ class TriangleCounting
     {
         if (recv_count_[source] > 0)
         {
-            GraphElem count;
-
-            char* rbuf = dbuf_[rindex_[source]].get((size_t&)count);
+            const GraphElem count = dbuf_[rindex_[source]].compress_ub();
+            char* rbuf = dbuf_[rindex_[source]].get_dptr();
 
             MPI_Irecv(&rbuf, count, MPI_BYTE, source, MPI_ANY_TAG, comm_, &rreq_[rindex_[source]]);
         }
@@ -703,9 +702,12 @@ class TriangleCounting
 #if defined(COMPRESS_COMM_BUFFERS)
           const int tag = status.MPI_TAG;
           if (tag == TAG_CMPR)
-              MPI_Get_count(&status, MPI_BYTE, &count);
+              count = bufsize_;
           else
-              MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
+          {
+              MPI_Get_count(&status, MPI_BYTE, &count);
+              count /= sizeof(GraphElem);
+          }
 #else
           MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
 #endif
@@ -714,8 +716,8 @@ class TriangleCounting
 #if defined(COMPRESS_COMM_BUFFERS)
           if (tag == TAG_CMPR)
           {
-              rbuf = &rbuf_[p*bufsize_];
               dbuf_[p].decompress();
+              rbuf = &rbuf_[p*bufsize_];
           }
           else
               rbuf = (GraphElem*)dbuf_[p].get_dptr();
@@ -787,9 +789,12 @@ class TriangleCounting
 #if defined(COMPRESS_COMM_BUFFERS)
           const int tag = rstatuses[i].MPI_TAG;
           if (tag == TAG_CMPR)
-              MPI_Get_count(&rstatuses[i], MPI_BYTE, &count);
+              count = bufsize_;
           else
-              MPI_Get_count(&rstatuses[i], MPI_GRAPH_TYPE, &count);
+          {
+              MPI_Get_count(&rstatuses[i], MPI_BYTE, &count);
+              count /= sizeof(GraphElem);
+          }
 #else
         MPI_Get_count(&rstatuses[i], MPI_GRAPH_TYPE, &count);
 #endif       
@@ -799,8 +804,8 @@ class TriangleCounting
 #if defined(COMPRESS_COMM_BUFFERS)
           if (tag == TAG_CMPR)
           {
-              rbuf = &rbuf_[idx*bufsize_];
               dbuf_[idx].decompress();
+              rbuf = &rbuf_[idx*bufsize_];
           }
           else
               rbuf = (GraphElem*)dbuf_[idx].get_dptr();
