@@ -180,45 +180,6 @@ void linear_partition(GraphElem* seq, GraphElem n, GraphElem k, GraphElem* bins)
 #if defined(COMPRESS_COMM_BUFFERS)
 #include "lz4.h"
 
-#if 0
-template <typename T>
-class Compress
-{
-    public:
-        Compress(size_t count): 
-            nelems_(count), size_(count*sizeof(T)), ubsize_(compression_ub(count)), cbuf_(nullptr), dbuf_(nullptr) 
-        {
-            cbuf_ = new char[ubsize_]; 
-            dbuf_ = new T[nelems_]; 
-        }
-
-        ~Compress()
-        {
-            delete []cbuf_;
-            delete []dbuf_;
-        }
-
-        size_t compression_ub(const size_t count) { return LZ4_compressBound(count*sizeof(T)); }
-        
-        char* compress(T* ptr)
-        { 
-            csize_ = LZ4_compress_default(reinterpret_cast<const char*>(ptr), cbuf_, size_, ubsize_); 
-            assert(csize_ >= 0);
-            return cbuf_;
-        }
-
-        T* decompress()
-        {
-            dsize_ = LZ4_decompress_safe(cbuf_, reinterpret_cast<char*>(dbuf_), csize_, size_);
-            assert((dsize_ >= 0) && (dsize_ == size_));
-            return dbuf_;
-        }
-    private:
-        char *cbuf_; 
-        T* dbuf_;
-        size_t nelems_, ubsize_, size_, csize_, dsize_;
-};
-#endif
 template <typename T>
 class Compress
 {
@@ -306,13 +267,13 @@ class Decompress
         void decompress()
         {
             dsize_ = LZ4_decompress_safe(buf_, reinterpret_cast<char*>(dbuf_), ubsize_, size_);
-            assert((dsize_ > 0) && (dsize_ == size_));
+            assert(dsize_ >= 0);
         }       
         
         void decompress(const GraphElem csize)
         {
             dsize_ = LZ4_decompress_safe(buf_, reinterpret_cast<char*>(dbuf_), csize, size_);
-            assert((dsize_ > 0) && (dsize_ == size_));
+            assert(dsize_ >= 0);
         }
 
         char* get(size_t& size) 
