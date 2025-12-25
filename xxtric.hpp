@@ -376,9 +376,9 @@ class TriangleCounting
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
 #if defined(COMPRESS_COMM_BUFFERS)
-          if (sbuf_ctr_[pindex_[owner]] == bufsize_)
+          if (sbuf_ctr_[pindex_[owner]] >= (bufsize_-2))
           {
-              MPI_Isend(cbuf_[pindex_[owner]].compress(), cbuf_[pindex_[owner]].compress_ub(), 
+              MPI_Isend(cbuf_[pindex_[owner]].compress(), cbuf_[pindex_[owner]].compress_sz(), 
                       MPI_BYTE, owner, TAG_CMPR, comm_, &sreq_[pindex_[owner]]);
           }
           else
@@ -678,17 +678,11 @@ class TriangleCounting
           int count = 0;
 
           const int source = status.MPI_SOURCE;
-          GraphElem* rbuf = nullptr;
-
-#if defined(COMPRESS_COMM_BUFFERS)
           const int tag = status.MPI_TAG;
-          if (tag == TAG_CMPR)
-              count = bufsize_;
-          else
-          {
-              MPI_Get_count(&status, MPI_BYTE, &count);
-              count /= sizeof(GraphElem);
-          }
+          GraphElem* rbuf = nullptr;
+          
+#if defined(COMPRESS_COMM_BUFFERS)
+          MPI_Get_count(&status, MPI_BYTE, &count);
 #else
           MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
 #endif
@@ -697,11 +691,13 @@ class TriangleCounting
 #if defined(COMPRESS_COMM_BUFFERS)
           if (tag == TAG_CMPR)
           {
-              dbuf_[p].decompress();
+              count = dbuf_[p].decompress((size_t)count);
               rbuf = &rbuf_[p*bufsize_];
           }
           else
               rbuf = (GraphElem*)dbuf_[p].get_dptr();
+      
+          count /= sizeof(GraphElem);
 #else
           rbuf = &rbuf_[p*bufsize_];
 #endif
@@ -761,17 +757,11 @@ class TriangleCounting
 
         int count = 0;
         const int source = rstatuses[i].MPI_SOURCE;
+        const int tag = rstatuses[i].MPI_TAG;
         GraphElem* rbuf = nullptr;
 
 #if defined(COMPRESS_COMM_BUFFERS)
-          const int tag = rstatuses[i].MPI_TAG;
-          if (tag == TAG_CMPR)
-              count = bufsize_;
-          else
-          {
-              MPI_Get_count(&rstatuses[i], MPI_BYTE, &count);
-              count /= sizeof(GraphElem);
-          }
+        MPI_Get_count(&rstatuses[i], MPI_BYTE, &count);
 #else
         MPI_Get_count(&rstatuses[i], MPI_GRAPH_TYPE, &count);
 #endif       
@@ -781,11 +771,12 @@ class TriangleCounting
 #if defined(COMPRESS_COMM_BUFFERS)
           if (tag == TAG_CMPR)
           {
-              dbuf_[idx].decompress();
+              count = dbuf_[idx].decompress((size_t)count);
               rbuf = &rbuf_[idx*bufsize_];
           }
           else
               rbuf = (GraphElem*)dbuf_[idx].get_dptr();
+          count /= sizeof(GraphElem);
 #else
           rbuf = &rbuf_[idx*bufsize_];
 #endif
