@@ -261,7 +261,7 @@ class Decompress
             buf_ = new char[ubsize_]; 
         }
 
-        size_t compress_ub() const { return LZ4_compressBound(size_); }
+        size_t compress_ub() const { return ubsize_; }
         size_t compress_ub(const size_t size) const { return LZ4_compressBound(size); }
         
         size_t decompress(const size_t csize)

@@ -376,9 +376,10 @@ class TriangleCounting
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
 #if defined(COMPRESS_COMM_BUFFERS)
-          if (sbuf_ctr_[pindex_[owner]] >= (bufsize_-2))
+          if (sbuf_ctr_[pindex_[owner]] >= (bufsize_ / 2))
           {
-              MPI_Isend(cbuf_[pindex_[owner]].compress(), cbuf_[pindex_[owner]].compress_sz(), 
+              char* s_ptr = cbuf_[pindex_[owner]].compress();
+              MPI_Isend(s_ptr, cbuf_[pindex_[owner]].compress_sz(), 
                       MPI_BYTE, owner, TAG_CMPR, comm_, &sreq_[pindex_[owner]]);
           }
           else
