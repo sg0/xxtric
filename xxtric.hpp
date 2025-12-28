@@ -378,8 +378,8 @@ class TriangleCounting
 #if defined(COMPRESS_COMM_BUFFERS)
           if (sbuf_ctr_[pindex_[owner]] >= (bufsize_ / 2))
           {
-              char* s_ptr = cbuf_[pindex_[owner]].compress();
-              MPI_Isend(s_ptr, cbuf_[pindex_[owner]].compress_sz(), 
+              const GraphElem size = cbuf_[pindex_[owner]].compress(sbuf_ctr_[pindex_[owner]]*sizeof(GraphElem));
+              MPI_Isend(cbuf_[pindex_[owner]].get_cptr(), size, 
                       MPI_BYTE, owner, TAG_CMPR, comm_, &sreq_[pindex_[owner]]);
           }
           else
@@ -409,7 +409,7 @@ class TriangleCounting
         if (recv_count_[source] > 0)
         {
 #if defined(COMPRESS_COMM_BUFFERS)
-            MPI_Irecv(dbuf_[rindex_[source]].get_dptr(), dbuf_[rindex_[source]].compress_ub(), 
+            MPI_Irecv(dbuf_[rindex_[source]].get_cptr(), bufsize_*sizeof(GraphElem), 
                     MPI_BYTE, source, MPI_ANY_TAG, comm_, &rreq_[rindex_[source]]);
 #else
             MPI_Irecv(&rbuf_[rindex_[source]*bufsize_], bufsize_, 
@@ -693,10 +693,10 @@ class TriangleCounting
           if (tag == TAG_CMPR)
           {
               count = dbuf_[p].decompress((size_t)count);
-              rbuf = &rbuf_[p*bufsize_];
+              rbuf = dbuf_[p].get_dptr();
           }
           else
-              rbuf = (GraphElem*)dbuf_[p].get_dptr();
+              rbuf = (GraphElem*)dbuf_[p].get_cptr();
       
           count /= sizeof(GraphElem);
 #else
@@ -773,10 +773,11 @@ class TriangleCounting
           if (tag == TAG_CMPR)
           {
               count = dbuf_[idx].decompress((size_t)count);
-              rbuf = &rbuf_[idx*bufsize_];
+              rbuf = dbuf_[idx].get_dptr();
           }
           else
-              rbuf = (GraphElem*)dbuf_[idx].get_dptr();
+              rbuf = (GraphElem*)dbuf_[idx].get_cptr();
+          
           count /= sizeof(GraphElem);
 #else
           rbuf = &rbuf_[idx*bufsize_];
@@ -896,9 +897,9 @@ class TriangleCounting
       GraphElem ttc = 0, ltc = ntriangles_;
       MPI_Barrier(comm_);
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
- 
+
 #if defined(COMPRESS_COMM_BUFFERS)
-	  const int compressed_size = cbuf_[pdegree_-1].compress_sz();
+	  const int compressed_size = cbuf_[pdegree_-1].compress();
       if (compressed_size > 0)
       {
           const size_t input_size = bufsize_*sizeof(GraphElem);
@@ -908,18 +909,17 @@ class TriangleCounting
 
           if (rank_ == 0)
           {
-              std::cout << "-------Per-PE compression statistics-------"<< std::endl;
+              std::cout << "-------Max per-PE compression statistics-------"<< std::endl;
               std::cout << "Original Size: " << input_size << " bytes" << std::endl;
               std::cout << "Compressed Size: " << compressed_size << " bytes" << std::endl;
               std::cout << "Compression Ratio (Original/Compressed): " << compression_ratio << " ("
                   << input_size / compressed_size << ":1 approx)" << std::endl;
               std::cout << "Compressed size is " << ratio_percentage << "% of original size." << std::endl;
               std::cout << "Space saved: " << space_saved_percentage << "%" << std::endl; 
-              std::cout << "-------Per-PE compression statistics-------"<< std::endl;
+              std::cout << "-------Max per-PE compression statistics-------"<< std::endl;
           }
       }
 #endif
-
       delete []inds;
 #if defined(USE_OPENMP)
 #else

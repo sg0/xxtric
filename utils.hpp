@@ -195,15 +195,7 @@ class Compress
         ~Compress() { delete []buf_; }
 
         size_t compress_ub(const size_t size) const { return LZ4_compressBound(size); }
-        size_t compress_ub() const { return LZ4_compressBound(size_); }
         size_t compress_sz() const { return csize_; }
-        
-        void set(size_t count)
-        {
-            size_ = count*sizeof(T);
-            ubsize_ = compress_ub(size_);
-            buf_ = new char[ubsize_]; 
-        }
         
         void set(size_t count, T* cptr)
         {
@@ -214,27 +206,22 @@ class Compress
             buf_ = new char[ubsize_]; 
         }
         
-        char* compress()
+        size_t compress()
         { 
             csize_ = LZ4_compress_default(reinterpret_cast<const char*>(cbuf_), buf_, size_, ubsize_); 
             assert(csize_ > 0);
-            return buf_;
-        }
-        
-        char* compress(T* ptr)
-        { 
-            csize_ = LZ4_compress_default(reinterpret_cast<const char*>(ptr), buf_, size_, ubsize_); 
-            assert(csize_ > 0);
-            return buf_;
-        }
-
-        size_t compress(char* buf, T* ptr, size_t count)
-        { 
-            csize_ = LZ4_compress_default(reinterpret_cast<const char*>(ptr), buf_, count, compress_ub(count*sizeof(T))); 
-            assert(csize_ > 0);
-            buf = buf_;
             return csize_;
         }
+        
+        size_t compress(size_t input_sz)
+        { 
+            csize_ = LZ4_compress_default(reinterpret_cast<const char*>(cbuf_), buf_, input_sz, ubsize_); 
+            assert(csize_ > 0);
+            return csize_;
+        }
+
+        char* get_cptr() const { return buf_; }
+        
     private:
         T* cbuf_;
         char* buf_;
@@ -250,8 +237,6 @@ class Decompress
         Decompress(T* dptr, size_t count): dbuf_(dptr), size_(count*sizeof(T)), dsize_(-1) {}
         ~Decompress() {}
 
-        size_t decompress_sz() const { return dsize_; }
-
         void set(size_t count, T* dptr)
         {
             dbuf_ = dptr;
@@ -261,7 +246,6 @@ class Decompress
             buf_ = new char[ubsize_]; 
         }
 
-        size_t compress_ub() const { return ubsize_; }
         size_t compress_ub(const size_t size) const { return LZ4_compressBound(size); }
         
         size_t decompress(const size_t csize)
@@ -271,19 +255,8 @@ class Decompress
             return dsize_;
         }       
         
-        void decompress(const GraphElem csize)
-        {
-            dsize_ = LZ4_decompress_safe(buf_, reinterpret_cast<char*>(dbuf_), csize, size_);
-            assert(dsize_ > 0);
-        }
-
-        char* get(size_t& size) 
-        { 
-            size = ubsize_;
-            return buf_;
-        }
-        
-        char* get_dptr() { return buf_; }
+        char* get_cptr() { return buf_; }
+        GraphElem* get_dptr() { return dbuf_; }
     private:
         char* buf_;
         T* dbuf_;
