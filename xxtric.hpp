@@ -899,16 +899,16 @@ class TriangleCounting
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
 #if defined(COMPRESS_COMM_BUFFERS)
-	  const int compressed_size = cbuf_[pdegree_-1].compress();
-      if (compressed_size > 0)
+      if (rank_ == 0)
       {
           const size_t input_size = bufsize_*sizeof(GraphElem);
-          double compression_ratio = static_cast<double>(input_size) / compressed_size;
-          double ratio_percentage = (static_cast<double>(compressed_size) / input_size) * 100.0;
-          double space_saved_percentage = (1.0 - static_cast<double>(compressed_size) / input_size) * 100.0;
-
-          if (rank_ == 0)
+          const int compressed_size = cbuf_[0].compress(input_size);
+          if (compressed_size > 0)
           {
+              double compression_ratio = static_cast<double>(input_size) / compressed_size;
+              double ratio_percentage = (static_cast<double>(compressed_size) / input_size) * 100.0;
+              double space_saved_percentage = (1.0 - static_cast<double>(compressed_size) / input_size) * 100.0;
+
               std::cout << "-------Max per-PE compression statistics-------"<< std::endl;
               std::cout << "Original Size: " << input_size << " bytes" << std::endl;
               std::cout << "Compressed Size: " << compressed_size << " bytes" << std::endl;
