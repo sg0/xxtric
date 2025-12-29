@@ -376,7 +376,7 @@ class TriangleCounting
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
 #if defined(COMPRESS_COMM_BUFFERS)
-          if (sbuf_ctr_[pindex_[owner]] >= (bufsize_ / 2))
+          if (sbuf_ctr_[pindex_[owner]] >= (bufsize_ - 1))
           {
               const GraphElem size = cbuf_[pindex_[owner]].compress(sbuf_ctr_[pindex_[owner]]*sizeof(GraphElem));
               MPI_Isend(cbuf_[pindex_[owner]].get_cptr(), size, 
@@ -920,6 +920,8 @@ class TriangleCounting
           }
       }
 #endif
+      MPI_Barrier(comm_);
+      
       delete []inds;
 #if defined(USE_OPENMP)
 #else
