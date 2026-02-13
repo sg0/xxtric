@@ -509,59 +509,9 @@ class BinaryEdgeList
         }
 #endif
 
-        void find_balanced_num_edges(int nprocs, std::string file, std::vector<GraphElem>& mbins)
-        {
-            FILE *fp;
-            GraphElem nv, ne; // #vertices, #edges
-            std::vector<GraphElem> nbins(nprocs,0);
-            
-            fp = fopen(file.c_str(), "rb");
-            if (fp == NULL) 
-            {
-                std::cout<< " Error opening file! " << std::endl;
-                return;
-            }
-
-            // read nv and ne
-            fread(&nv, sizeof(GraphElem), 1, fp);
-            fread(&ne, sizeof(GraphElem), 1, fp);
-          
-            // bin capacity
-            GraphElem nbcap = (ne / nprocs);
-            std::vector<GraphElem> ecount_idx(nv+1, 0);
-            int p = 0;
-
-            fread(ecount_idx.data(), sizeof(GraphElem), nv+1, fp);
-            fclose(fp);
-
-            for (GraphElem m = 0; m < nv; m++)
-            {
-              // bins[p] >= capacity only for the last process
-              GraphElem m_edges = (ecount_idx[m+1] - ecount_idx[m]);
-               
-              // increment p as long as p is not the last process
-              // prevent excess edges pile up on (p-1)
-              if (((nbins[p] + m_edges) <= nbcap) || (p == (nprocs - 1)))
-                  nbins[p] += m_edges;
-              else
-              {
-                  p++;
-                  nbins[p] += m_edges;
-              }
-
-              mbins[p+1]++;
-            }
-            
-            // prefix sum to store indices 
-            for (int k = 1; k < nprocs+1; k++)
-                mbins[k] += mbins[k-1]; 
-            
-            nbins.clear();
-            ecount_idx.clear();
-        }
 
 #if defined(USE_EXP_BALANCED_DIST)
-        void find_balanced_num_edges_exp(int nprocs, std::string file, std::vector<GraphElem>& mbins)
+        void find_balanced_num_edges(int nprocs, std::string file, std::vector<GraphElem>& mbins)
         {
             FILE *fp;
             GraphElem nv, ne; // #vertices, #edges
@@ -641,6 +591,57 @@ class BinaryEdgeList
             ecount_idx.clear();
             brange.clear();
         }
+#else
+        void find_balanced_num_edges(int nprocs, std::string file, std::vector<GraphElem>& mbins)
+        {
+            FILE *fp;
+            GraphElem nv, ne; // #vertices, #edges
+            std::vector<GraphElem> nbins(nprocs,0);
+            
+            fp = fopen(file.c_str(), "rb");
+            if (fp == NULL) 
+            {
+                std::cout<< " Error opening file! " << std::endl;
+                return;
+            }
+
+            // read nv and ne
+            fread(&nv, sizeof(GraphElem), 1, fp);
+            fread(&ne, sizeof(GraphElem), 1, fp);
+          
+            // bin capacity
+            GraphElem nbcap = (ne / nprocs);
+            std::vector<GraphElem> ecount_idx(nv+1, 0);
+            int p = 0;
+
+            fread(ecount_idx.data(), sizeof(GraphElem), nv+1, fp);
+            fclose(fp);
+
+            for (GraphElem m = 0; m < nv; m++)
+            {
+              // bins[p] >= capacity only for the last process
+              GraphElem m_edges = (ecount_idx[m+1] - ecount_idx[m]);
+               
+              // increment p as long as p is not the last process
+              // prevent excess edges pile up on (p-1)
+              if (((nbins[p] + m_edges) <= nbcap) || (p == (nprocs - 1)))
+                  nbins[p] += m_edges;
+              else
+              {
+                  p++;
+                  nbins[p] += m_edges;
+              }
+
+              mbins[p+1]++;
+            }
+            
+            // prefix sum to store indices 
+            for (int k = 1; k < nprocs+1; k++)
+                mbins[k] += mbins[k-1]; 
+            
+            nbins.clear();
+            ecount_idx.clear();
+        }
 #endif
 
         // read a file and return a graph
@@ -660,7 +661,7 @@ class BinaryEdgeList
               if (!static_or_dyn)
               {
 #if defined(USE_EXP_BALANCED_DIST)
-                find_balanced_num_edges_exp(nprocs, file, mbins);
+                find_balanced_num_edges(nprocs, file, mbins);
 #else
                 find_balanced_num_edges(nprocs, file, mbins);
 #endif

@@ -61,6 +61,8 @@
 
 #if defined(USE_CUDA)
 #include "xxtric-gpu.hpp"
+#elif defined(USE_CUDA_CPU)
+#include "xxtric-gpu-cpu.hpp"
 #elif defined(USE_CUDA_IPC)
 #include "xxtric-gpu-ipc.hpp"
 #elif defined(USE_CUDA_IPC_MPI)
