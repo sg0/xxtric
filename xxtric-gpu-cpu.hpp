@@ -401,162 +401,165 @@ class TriangleCounting
     /// for GPU PE target outgoing is {u, v} tuple (uncompressed)
     inline void lookup_edges()
     {
-      if (pdegree_ == 0)
-        return;
-      
-      const GraphElem lnv = g_->get_lnv();
+	    if (pdegree_ == 0)
+		    return;
 
-      for (GraphElem i = 0; i < lnv; i++)
-      {
-        if (vcount_[i] == 0) // all edges processed, move on
-          continue;
+	    const GraphElem lnv = g_->get_lnv();
 
-        GraphElem e0, e1;
-        g_->edge_range(i, e0, e1);
-        GraphElem global_i = g_->local_to_global(i);
+	    for (GraphElem i = 0; i < lnv; i++)
+	    {
+		    if (vcount_[i] == 0) // all edges processed, move on
+			    continue;
 
-        if ((e0 + 1) == e1)
-          continue;
+		    GraphElem e0, e1;
+		    g_->edge_range(i, e0, e1);
+		    GraphElem global_i = g_->local_to_global(i);
 
-        for (GraphElem m = e0; m < e1-1; m++)
-        {
-          EdgeStat& edge = g_->get_edge_stat(m);
-          const int owner = g_->get_owner(edge.edge_->tail_);
-          
-          if (global_i >= edge.edge_->tail_ || !edge.active_ || owner <= rank_)
-              continue;
+		    if ((e0 + 1) == e1)
+			    continue;
 
-          const GraphElem pidx = pindex_[owner];
-          const GraphElem disp = pidx*bufsize_;
-	  
-	  if (stat_[pidx] == '1') 
-              continue;
- 
-	  if (ptag_[owner] == TAG_CPU) // CPU
-          {   
-            if (m >= prev_m_[pidx])
-            {
-              if (sbuf_ctr_[pidx] == (bufsize_-1))
-              {
-                prev_m_[pidx] = m;
-                prev_k_[pidx] = -1;
+		    for (GraphElem m = e0; m < e1-1; m++)
+		    {
+			    EdgeStat& edge = g_->get_edge_stat(m);
+			    const int owner = g_->get_owner(edge.edge_->tail_);
 
-                nbsend(owner);
+			    if (global_i >= edge.edge_->tail_)
+				    continue;
 
-                continue;
-              }
+			    const GraphElem pidx = pindex_[owner];
+			    const GraphElem disp = pidx*bufsize_;
 
-              sbuf_[disp+sbuf_ctr_[pidx]] = edge.edge_->tail_;
-              sbuf_ctr_[pidx] += 1;
+			    if (edge.active_ && owner > rank_)
+			    {
+				    if (stat_[pidx] == '1') 
+					    continue;
 
-              for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
-              {  
-                Edge const& edge_n = g_->get_edge(n); 
-                    
-                if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
-                  break;
+				    if (ptag_[owner] == TAG_CPU) // CPU
+				    {   
+					    if (m >= prev_m_[pidx])
+					    {
+						    if (sbuf_ctr_[pidx] == (bufsize_-1))
+						    {
+							    prev_m_[pidx] = m;
+							    prev_k_[pidx] = -1;
 
-                if (sbuf_ctr_[pidx] == (bufsize_-1))
-                {
-                  prev_m_[pidx] = m;
-                  prev_k_[pidx] = n;
+							    nbsend(owner);
 
-                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
-                  sbuf_ctr_[pidx] += 1;
+							    continue;
+						    }
 
-                  nbsend(owner);
+						    sbuf_[disp+sbuf_ctr_[pidx]] = edge.edge_->tail_;
+						    sbuf_ctr_[pidx] += 1;
 
-                  break;
-                }
+						    for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
+						    {  
+							    Edge const& edge_n = g_->get_edge(n); 
 
-                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
-                  continue;
+							    if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+								    break;
 
-                sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
-                sbuf_ctr_[pidx] += 1;
+							    if (sbuf_ctr_[pidx] == (bufsize_-1))
+							    {
+								    prev_m_[pidx] = m;
+								    prev_k_[pidx] = n;
 
-                out_nghosts_ -= 1;
-                vcount_[i] -= 1;
-              }
-              
-	      if (stat_[pidx] == '0') 
-              {               
-                prev_m_[pidx] = m;
-                prev_k_[pidx] = -1;
-                
-                edge.active_ = false;
+								    sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
+								    sbuf_ctr_[pidx] += 1;
 
-                if (sbuf_ctr_[pidx] == (bufsize_-1))
-                {
-                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
-                  sbuf_ctr_[pidx] += 1;
+								    nbsend(owner);
 
-                  nbsend(owner);
-                }
-                else
-                {
-                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
-                  sbuf_ctr_[pidx] += 1;
-                }
-              }
+								    break;
+							    }
+
+							    if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
+								    continue;
+
+							    sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
+							    sbuf_ctr_[pidx] += 1;
+
+							    out_nghosts_ -= 1;
+							    vcount_[i] -= 1;
+						    }
+
+						    if (stat_[pidx] == '0') 
+						    {               
+							    prev_m_[pidx] = m;
+							    prev_k_[pidx] = -1;
+
+							    edge.active_ = false;
+
+							    if (sbuf_ctr_[pidx] == (bufsize_-1))
+							    {
+								    sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+								    sbuf_ctr_[pidx] += 1;
+
+								    nbsend(owner);
+							    }
+							    else
+							    {
+								    sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+								    sbuf_ctr_[pidx] += 1;
+							    }
+						    }
+					    }
+				    }
+				    else // GPU
+				    {
+					    if (m >= prev_m_[pidx])
+					    {
+						    if (sbuf_ctr_[pidx] == bufsize_)
+						    {
+							    prev_m_[pidx] = m;
+							    prev_k_[pidx] = -1;
+
+							    nbsend(owner);
+
+							    continue;
+						    }
+
+						    for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
+						    { 
+							    Edge const& edge_n = g_->get_edge(n); 
+
+							    if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+								    break;
+
+							    if (sbuf_ctr_[pidx] == bufsize_)
+							    {
+								    prev_m_[pidx] = m;
+								    prev_k_[pidx] = n;
+
+								    nbsend(owner);
+
+								    break;
+							    }
+
+							    if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
+								    continue;
+
+							    sbuf_[disp+sbuf_ctr_[pidx]]   = edge.edge_->tail_;
+							    sbuf_[disp+sbuf_ctr_[pidx]+1] = edge_n.tail_;
+							    sbuf_ctr_[pidx] += 2;
+
+							    out_nghosts_ -= 2;
+							    vcount_[i] -= 1;
+						    }
+
+						    if (stat_[pidx] == '0') 
+						    {               
+							    prev_m_[pidx] = m;
+							    prev_k_[pidx] = -1;
+
+							    edge.active_ = false;
+
+							    if (sbuf_ctr_[pidx] == bufsize_)
+								    nbsend(owner);
+						    }
+					    }
+				    }
+			    }
+		    }
 	    }
-	  }
-	  else // GPU
-	  {
-            if (m >= prev_m_[pidx])
-            {
-              if (sbuf_ctr_[pidx] == bufsize_)
-              {
-                prev_m_[pidx] = m;
-                prev_k_[pidx] = -1;
-
-                nbsend(owner);
-
-                continue;
-              }
-
-              for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
-              { 
-                Edge const& edge_n = g_->get_edge(n); 
-                    
-                if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
-                  break;
-                
-                if (sbuf_ctr_[pidx] == bufsize_)
-                {
-                  prev_m_[pidx] = m;
-                  prev_k_[pidx] = n;
-
-                  nbsend(owner);
-
-                  break;
-                }
-
-                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
-                  continue;
-
-                sbuf_[disp+sbuf_ctr_[pidx]]   = edge.edge_->tail_;
-                sbuf_[disp+sbuf_ctr_[pidx]+1] = edge_n.tail_;
-                sbuf_ctr_[pidx] += 2;
-
-                out_nghosts_ -= 2;
-                vcount_[i] -= 1;
-              }
-
-              if (stat_[pidx] == '0') 
-              {               
-                prev_m_[pidx] = m;
-                prev_k_[pidx] = -1;
-                
-                edge.active_ = false;
-                
-		if (sbuf_ctr_[pidx] == bufsize_)
-                  nbsend(owner);
-              }
-            }
-	  }
-	}
-      }
     }
         
     inline bool check_edgelist(GraphElem (&tup)[2])
