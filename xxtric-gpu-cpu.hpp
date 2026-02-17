@@ -51,8 +51,11 @@
 #include <string> 
 #include <memory>
 
-#ifndef TAG_DATA
-#define TAG_DATA  (100)
+#ifndef TAG_CPU
+#define TAG_CPU  (100)
+#endif
+#ifndef TAG_GPU
+#define TAG_GPU  (200)
 #endif
 
 #include "counting.cuh"
@@ -64,7 +67,7 @@ class TriangleCounting
     TriangleCounting(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), pdegree_(0), 
       sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
-      nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
+      nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), ptag_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
       recv_count_(nullptr), rindex_(0), rdegree_(0), d_eind_(nullptr), d_elst_(nullptr), d_rbuf_(nullptr), 
       d_ntriangles_(nullptr), rstat_(nullptr), rinds_(nullptr), rbuf_(nullptr), e_rstreams_(nullptr), count_rstreams_(0), 
@@ -115,7 +118,7 @@ class TriangleCounting
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
-    MPI_Comm_split_type(comm_, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shm_comm_);
+    MPI_Comm_split_type(comm_, MPI_COMM_TYPE_SHARED, rank_, MPI_INFO_NULL, &shm_comm_);
     MPI_Comm_rank(shm_comm_, &shm_rank_);
     MPI_Comm_size(shm_comm_, &shm_size_);
     
@@ -139,9 +142,14 @@ class TriangleCounting
     /// Local counting
    
     GraphElem nst = 0;
-    cudaStream_t* streams = new cudaStream_t[MAX_CUDA_STREAMS];
-    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
-      cudaStreamCreate(&streams[t]);
+    cudaStream_t* streams = nullptr;
+    
+    if (shm_rank_ < ndevices_)
+    {
+	    streams = new cudaStream_t[MAX_CUDA_STREAMS];
+	    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
+		    cudaStreamCreate(&streams[t]);
+    }
 
     for (GraphElem i = 0; i < lnv; i++)
     {
@@ -202,7 +210,10 @@ class TriangleCounting
               if (!edge_above_min(edge_m.tail_, edge_n.tail_))
                 continue;
 
-              send_count[owner] += 2;
+	      if (owner % shm_size_ >= ndevices_)
+		      send_count[owner] += 1;
+	      else
+		      send_count[owner] += 2;
               vcount_[i] += 1;
             }
           }
@@ -210,11 +221,14 @@ class TriangleCounting
       }
     }
     
-    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
-      cudaStreamDestroy(streams[t]);
+    if (shm_rank_ < ndevices_)
+    {
+	    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
+		    cudaStreamDestroy(streams[t]);
+	    CudaDeviceSynchronize();
+    }
     delete []streams;
         
-    CudaDeviceSynchronize();
 
     double t1 = MPI_Wtime(); 
     double p_tot = t1 - t0, t_tot = 0.0, t_max = 0.0, t_min = 0.0;
@@ -256,7 +270,14 @@ class TriangleCounting
 
     for (int i = 0; i < rdegree_; i++)
       rindex_.insert({sources_[i], i});
-
+    
+    for (int i = 0; i < pdegree_; i++)
+    {
+      if (targets_[i] % shm_size_ < ndevices_)
+	      ptag_.insert({targets_[i], TAG_GPU});
+      else
+	      ptag_.insert({targets_[i], TAG_CPU});
+    }
     nghosts_ = out_nghosts_ + in_nghosts_;
 
     bufsize_ = ((nghosts_*2 < bufsize) || (bufsize == -1)) ? nghosts_*2 : bufsize;
@@ -284,11 +305,15 @@ class TriangleCounting
 
     sbuf_     = new GraphElem[pdegree_*bufsize_];
     rbuf_     = new GraphElem[rdegree_*bufsize_];
-    count_rstreams_ = MIN(MAX_CUDA_STREAMS, rdegree_);
-    e_rstreams_ = new cudaStream_t[count_rstreams_];
-    for (int t = 0; t < count_rstreams_; t++)
-      cudaStreamCreate(&e_rstreams_[t]);
-    CudaMalloc(d_rbuf_, count_rstreams_*bufsize_*sizeof(GraphElem));
+    
+    if (shm_rank_ < ndevices_)
+    {
+	    count_rstreams_ = MIN(MAX_CUDA_STREAMS, rdegree_);
+	    e_rstreams_ = new cudaStream_t[count_rstreams_];
+	    for (int t = 0; t < count_rstreams_; t++)
+		    cudaStreamCreate(&e_rstreams_[t]);
+	    CudaMalloc(d_rbuf_, count_rstreams_*bufsize_*sizeof(GraphElem));
+    }
 
     MPI_Barrier(comm_);
 
@@ -324,13 +349,17 @@ class TriangleCounting
       delete []vcount_;
       delete []erange_;
 
-      CudaFree(d_eind_);
-      CudaFree(d_elst_);
-      CudaFree(d_rbuf_);
-      CudaFree(d_ntriangles_);
+      if (shm_rank_ < ndevices_)
+      {
+	      CudaFree(d_eind_);
+	      CudaFree(d_elst_);
+	      CudaFree(d_rbuf_);
+	      CudaFree(d_ntriangles_);
+      }
 
       delete []e_rstreams_;
       
+      ptag_.clear();
       pindex_.clear();
       targets_.clear();
       rindex_.clear();
@@ -342,7 +371,7 @@ class TriangleCounting
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
-            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+            MPI_GRAPH_TYPE, owner, ptag_[owner], comm_, &sreq_[pindex_[owner]]);
         stat_[pindex_[owner]] = '1'; 
       }
     }
@@ -358,7 +387,7 @@ class TriangleCounting
         if (recv_count_[source] > 0)
         {
 	      MPI_Irecv(&rbuf_[rindex_[source]*bufsize_], bufsize_, 
-                MPI_GRAPH_TYPE, source, TAG_DATA, comm_, &rreq_[rindex_[source]]);
+                MPI_GRAPH_TYPE, source, MPI_ANY_TAG, comm_, &rreq_[rindex_[source]]);
         }
     }
 
@@ -394,17 +423,86 @@ class TriangleCounting
           EdgeStat& edge = g_->get_edge_stat(m);
           const int owner = g_->get_owner(edge.edge_->tail_);
           
-          if (global_i >= edge.edge_->tail_)
+          if (global_i >= edge.edge_->tail_ || !edge.active_ || owner <= rank_)
               continue;
 
           const GraphElem pidx = pindex_[owner];
           const GraphElem disp = pidx*bufsize_;
-
-          if (edge.active_ && owner > rank_)
-          {   
-            if (stat_[pidx] == '1') 
+	  
+	  if (stat_[pidx] == '1') 
               continue;
+ 
+	  if (ptag_[owner] == TAG_CPU) // CPU
+          {   
+            if (m >= prev_m_[pidx])
+            {
+              if (sbuf_ctr_[pidx] == (bufsize_-1))
+              {
+                prev_m_[pidx] = m;
+                prev_k_[pidx] = -1;
 
+                nbsend(owner);
+
+                continue;
+              }
+
+              sbuf_[disp+sbuf_ctr_[pidx]] = edge.edge_->tail_;
+              sbuf_ctr_[pidx] += 1;
+
+              for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
+              {  
+                Edge const& edge_n = g_->get_edge(n); 
+                    
+                if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+                  break;
+
+                if (sbuf_ctr_[pidx] == (bufsize_-1))
+                {
+                  prev_m_[pidx] = m;
+                  prev_k_[pidx] = n;
+
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
+                  sbuf_ctr_[pidx] += 1;
+
+                  nbsend(owner);
+
+                  break;
+                }
+
+                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
+                  continue;
+
+                sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
+                sbuf_ctr_[pidx] += 1;
+
+                out_nghosts_ -= 1;
+                vcount_[i] -= 1;
+              }
+              
+	      if (stat_[pidx] == '0') 
+              {               
+                prev_m_[pidx] = m;
+                prev_k_[pidx] = -1;
+                
+                edge.active_ = false;
+
+                if (sbuf_ctr_[pidx] == (bufsize_-1))
+                {
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                  sbuf_ctr_[pidx] += 1;
+
+                  nbsend(owner);
+                }
+                else
+                {
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                  sbuf_ctr_[pidx] += 1;
+                }
+              }
+	    }
+	  }
+	  else // GPU
+	  {
             if (m >= prev_m_[pidx])
             {
               if (sbuf_ctr_[pidx] == bufsize_)
@@ -437,21 +535,12 @@ class TriangleCounting
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
                   continue;
 
-		if ((owner % shm_size_) < ndevices_)
-		{
-			sbuf_[disp+sbuf_ctr_[pidx]]   = edge.edge_->tail_;
-			sbuf_[disp+sbuf_ctr_[pidx]+1] = edge_n.tail_;
-			sbuf_ctr_[pidx] += 2;
-			out_nghosts_ -= 2;
-		}
-		else
-		{
-			sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
-			sbuf_ctr_[pidx] += 1;
-			out_nghosts_ -= 1;
-		}
+                sbuf_[disp+sbuf_ctr_[pidx]]   = edge.edge_->tail_;
+                sbuf_[disp+sbuf_ctr_[pidx]+1] = edge_n.tail_;
+                sbuf_ctr_[pidx] += 2;
 
-		vcount_[i] -= 1;
+                out_nghosts_ -= 2;
+                vcount_[i] -= 1;
               }
 
               if (stat_[pidx] == '0') 
@@ -460,13 +549,13 @@ class TriangleCounting
                 prev_k_[pidx] = -1;
                 
                 edge.active_ = false;
-
-                if (sbuf_ctr_[pidx] == bufsize_)
+                
+		if (sbuf_ctr_[pidx] == bufsize_)
                   nbsend(owner);
               }
             }
-          }
-        }
+	  }
+	}
       }
     }
         
@@ -530,65 +619,71 @@ class TriangleCounting
 	    GraphElem base = g_->get_base(rank_);
 	    GraphElem nst = 0;
 
-	    int over = -1;
-	    MPI_Testsome(rdegree_, rreq_, &over, rinds_, rstat_);
-
-	    for (int i = 0; i < over; i++)
+	    for (GraphElem p = 0; p < rdegree_; p++)
 	    {
-		    GraphElem tup[2] = {-1,-1}, prev = 0;
-		    const int idx = rinds_[i];
+		    int over = -1;
+		    MPI_Status rstat;
 
-		    int count = 0;
-		    const int source = rstat_[i].MPI_SOURCE;
-	
-		    MPI_Get_count(&rstat_[i], MPI_GRAPH_TYPE, &count);
+		    MPI_Test(&rreq_[p], &over, &rstat);
 
-		    if (source != MPI_ANY_SOURCE)
+		    if (over)
 		    {
-			    if ((rank_ % shm_size_) < ndevices_)
+			    int count = 0;
+			    const int source = rstat.MPI_SOURCE;
+			    const int tag = rstat.MPI_TAG;
+			    MPI_Get_count(&rstat, MPI_GRAPH_TYPE, &count);
+
+			    if (source != MPI_ANY_SOURCE)
 			    {
-				    const int s_idx = nst % count_rstreams_;
-				    CudaMemcpyAsyncHtoD(&d_rbuf_[s_idx*bufsize_], &rbuf_[idx*bufsize_], count*sizeof(GraphElem), e_rstreams_[s_idx]);
-				    local_count_gpu_recv(count, base, &d_rbuf_[s_idx*bufsize_], d_eind_, d_elst_, d_ntriangles_, e_rstreams_[s_idx]);
-				    nst++;
-			    }
-			    else
-			    {
-				    for (GraphElem k = 0; k < count;)
+				    if (tag == TAG_GPU)
 				    {
-					    if (rbuf_[idx*bufsize_+k] == -1)
-					    {
-						    k += 1;
-						    prev = k;
-						    continue;
-					    }
+					    const int s_idx = nst % count_rstreams_;
+					    CudaMemcpyAsyncHtoD(&d_rbuf_[s_idx*bufsize_], &rbuf_[p*bufsize_], count*sizeof(GraphElem), e_rstreams_[s_idx]);
+					    local_count_gpu_recv(count, base, &d_rbuf_[s_idx*bufsize_], d_eind_, d_elst_, d_ntriangles_, e_rstreams_[s_idx]);
+					    nst++;
 
-					    tup[0] = rbuf_[idx*bufsize_+k];
-					    GraphElem curr_count = 0;
-
-					    for (GraphElem m = k + 1; m < count; m++)
+					    in_nghosts_ -= count;
+					    recv_count_[source] -= count;
+				    }
+				    else
+				    {
+					    GraphElem tup[2] = {-1,-1}, prev = 0;
+					    for (GraphElem k = 0; k < count;)
 					    {
-						    if (rbuf_[idx*bufsize_+m] == -1)
+						    if (rbuf_[p*bufsize_+k] == -1)
 						    {
-							    curr_count = m + 1;
-							    break;
+							    k += 1;
+							    prev = k;
+							    continue;
 						    }
 
-						    tup[1] = rbuf_[idx*bufsize_+m];
+						    tup[0] = rbuf_[p*bufsize_+k];
+						    GraphElem curr_count = 0;
 
-						    if (check_edgelist(tup))
-							    ntriangles_ += 1;
+						    for (GraphElem m = k + 1; m < count; m++)
+						    {
+							    if (rbuf_[p*bufsize_+m] == -1)
+							    {
+								    curr_count = m + 1;
+								    break;
+							    }
+
+							    tup[1] = rbuf_[p*bufsize_+m];
+
+							    if (check_edgelist(tup))
+								    ntriangles_ += 1;
+						    }
+
+						    k += (curr_count - prev);
+						    prev = k;
+
+						    in_nghosts_ -= 1;
+						    recv_count_[source] -= 1;
 					    }
-
-					    k += (curr_count - prev);
-					    prev = k;
 				    }
-			    }
 
-			    in_nghosts_ -= count;
-			    recv_count_[source] -= count;
-			    
-			    nbrecv(source);
+				    nbrecv(source);
+			    }
 		    }
 	    }
     }
@@ -658,9 +753,12 @@ class TriangleCounting
         cudaStreamDestroy(e_rstreams_[t]);
       CudaDeviceSynchronize();
       
-      CudaMemcpyDtoH(&ntriangles_, d_ntriangles_, sizeof(GraphElem));
+      GraphElem gpu_ntriangles = 0;
 
-      GraphElem ttc = 0, ltc = ntriangles_;
+      if (shm_rank_ < ndevices_)
+	      CudaMemcpyDtoH(&gpu_ntriangles, d_ntriangles_, sizeof(GraphElem));
+
+      GraphElem ttc = 0, ltc = ntriangles_ + gpu_ntriangles;
       MPI_Barrier(comm_);
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
       
@@ -686,7 +784,7 @@ class TriangleCounting
 
     int rank_, size_, shm_rank_, shm_size_, ndevices_;
     std::vector<int> targets_, sources_;
-    std::unordered_map<int, int> pindex_, rindex_; 
+    std::unordered_map<int, int> pindex_, rindex_, ptag_; 
     
     MPI_Comm comm_, shm_comm_;
 };
