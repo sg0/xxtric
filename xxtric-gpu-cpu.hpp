@@ -51,11 +51,8 @@
 #include <string> 
 #include <memory>
 
-#ifndef TAG_CPU
-#define TAG_CPU  (100)
-#endif
-#ifndef TAG_GPU
-#define TAG_GPU  (200)
+#ifndef TAG_DATA
+#define TAG_DATA  (100)
 #endif
 
 #include "counting.cuh"
@@ -67,7 +64,7 @@ class TriangleCounting
     TriangleCounting(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), pdegree_(0), 
       sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
-      nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), ptag_(0), prev_m_(nullptr), 
+      nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
       recv_count_(nullptr), rindex_(0), rdegree_(0), d_eind_(nullptr), d_elst_(nullptr), d_rbuf_(nullptr), 
       d_ntriangles_(nullptr), rstat_(nullptr), rinds_(nullptr), rbuf_(nullptr), e_rstreams_(nullptr), count_rstreams_(0), 
@@ -124,6 +121,9 @@ class TriangleCounting
     
     /// assume all tasks/node can see all GPUs in a node
     cudaGetDeviceCount(&ndevices_);
+     
+    GraphElem nst = 0;
+    cudaStream_t* streams = nullptr;
     
     if (shm_rank_ < ndevices_)
     {
@@ -137,88 +137,99 @@ class TriangleCounting
 	    CudaMemcpyHtoD(d_elst_, etails.data(), lne*sizeof(GraphElem));
 
 	    CudaMemset(d_ntriangles_, 0, sizeof(GraphElem));
-    }
 
-    /// Local counting
-   
-    GraphElem nst = 0;
-    cudaStream_t* streams = nullptr;
-    
-    if (shm_rank_ < ndevices_)
-    {
-	    streams = new cudaStream_t[MAX_CUDA_STREAMS];
+            streams = new cudaStream_t[MAX_CUDA_STREAMS];
 	    for (int t = 0; t < MAX_CUDA_STREAMS; t++)
 		    cudaStreamCreate(&streams[t]);
     }
 
+    MPI_Barrier(comm_);
+
+    /// Local counting
+   
     for (GraphElem i = 0; i < lnv; i++)
     {
-      GraphElem e0, e1, tup[2];
-      g_->edge_range(i, e0, e1);
-      const GraphElem global_i = g_->local_to_global(i);
-      
-      if ((e0 + 1) == e1)
-        continue;
-      
-      for (GraphElem m = e0; m < e1-1; m++)
-      {
-        Edge const& edge_m = g_->get_edge(m);
-        const int owner = g_->get_owner(edge_m.tail_);
-        
-        if (global_i >= edge_m.tail_)
-          continue;
-        
-        if (owner == rank_)
-        {
-		if (shm_rank_ < ndevices_)
-		{
-			GraphElem jstart, jend;
-			g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
-			local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
-			nst++;
-		}
-		else
-		{
-			tup[0] = edge_m.tail_;
-			for (GraphElem n = m + 1; n < e1; n++)
-			{
-				Edge const& edge_n = g_->get_edge(n);
+	    GraphElem e0, e1, tup[2];
+	    g_->edge_range(i, e0, e1);
+	    const GraphElem global_i = g_->local_to_global(i);
 
-				if (!edge_within_max(edge_m.tail_, edge_n.tail_))
-					break;
+	    if ((e0 + 1) == e1)
+		    continue;
 
-				if (!edge_above_min(edge_m.tail_, edge_n.tail_))
-					continue;
+	    for (GraphElem m = e0; m < e1-1; m++)
+	    {
+		    Edge const& edge_m = g_->get_edge(m);
+		    const int owner = g_->get_owner(edge_m.tail_);
 
-				tup[1] = edge_n.tail_;
+		    if (global_i >= edge_m.tail_)
+			    continue;
 
-				if (check_edgelist(tup))
-					ntriangles_ += 1;
-			}
-		}
-	}
-        else
-        {
-          if (owner > rank_)
-          {
-            for (GraphElem n = m + 1; n < e1; n++)
-            {
-              Edge const& edge_n = g_->get_edge(n);
+		    if (owner == rank_)
+		    {
+			    if (shm_rank_ < ndevices_)
+			    {
+				    GraphElem jstart, jend;
+				    g_->edge_range(g_->global_to_local(edge_m.tail_), jstart, jend);
+				    local_count_gpu_inner(m+1, e1, jstart, jend, d_elst_, d_ntriangles_, &streams[nst % MAX_CUDA_STREAMS]);
+				    nst++;
+			    }
+			    else
+			    {
+				    tup[0] = edge_m.tail_;
+				    for (GraphElem n = m + 1; n < e1; n++)
+				    {
+					    Edge const& edge_n = g_->get_edge(n);
 
-              if (!edge_within_max(edge_m.tail_, edge_n.tail_))
-                break;
-              if (!edge_above_min(edge_m.tail_, edge_n.tail_))
-                continue;
+					    if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+						    break;
 
-	      if (owner % shm_size_ >= ndevices_)
-		      send_count[owner] += 1;
-	      else
-		      send_count[owner] += 2;
-              vcount_[i] += 1;
-            }
-          }
-        }
-      }
+					    if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+						    continue;
+
+					    tup[1] = edge_n.tail_;
+
+					    if (check_edgelist(tup))
+						    ntriangles_ += 1;
+				    }
+			    }
+		    }
+		    else
+		    {
+			    if (owner > rank_)
+			    {
+				    if (owner % shm_size_ < ndevices_)
+				    {
+					    for (GraphElem n = m + 1; n < e1; n++)
+					    {
+						    Edge const& edge_n = g_->get_edge(n);
+
+						    if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+							    break;
+						    if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+							    continue;
+
+						    send_count[owner] += 2;
+						    vcount_[i] += 1;
+					    }
+				    }
+				    else
+				    {
+					    for (GraphElem n = m + 1; n < e1; n++)
+					    {
+						    Edge const& edge_n = g_->get_edge(n);
+
+						    if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+							    break;
+						    if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+							    continue;
+
+						    send_count[owner] += 1;
+						    vcount_[i] += 1;
+					    }
+				    }
+			    }
+		    }
+	    }
     }
     
     if (shm_rank_ < ndevices_)
@@ -271,17 +282,9 @@ class TriangleCounting
     for (int i = 0; i < rdegree_; i++)
       rindex_.insert({sources_[i], i});
     
-    for (int i = 0; i < pdegree_; i++)
-    {
-      if (targets_[i] % shm_size_ < ndevices_)
-	      ptag_.insert({targets_[i], TAG_GPU});
-      else
-	      ptag_.insert({targets_[i], TAG_CPU});
-    }
     nghosts_ = out_nghosts_ + in_nghosts_;
 
     bufsize_ = ((nghosts_*2 < bufsize) || (bufsize == -1)) ? nghosts_*2 : bufsize;
-
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
 
     if (rank_ == 0)
@@ -359,7 +362,6 @@ class TriangleCounting
 
       delete []e_rstreams_;
       
-      ptag_.clear();
       pindex_.clear();
       targets_.clear();
       rindex_.clear();
@@ -371,7 +373,7 @@ class TriangleCounting
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
-            MPI_GRAPH_TYPE, owner, ptag_[owner], comm_, &sreq_[pindex_[owner]]);
+            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
         stat_[pindex_[owner]] = '1'; 
       }
     }
@@ -387,7 +389,7 @@ class TriangleCounting
         if (recv_count_[source] > 0)
         {
 	      MPI_Irecv(&rbuf_[rindex_[source]*bufsize_], bufsize_, 
-                MPI_GRAPH_TYPE, source, MPI_ANY_TAG, comm_, &rreq_[rindex_[source]]);
+                MPI_GRAPH_TYPE, source, TAG_DATA, comm_, &rreq_[rindex_[source]]);
         }
     }
 
@@ -434,10 +436,10 @@ class TriangleCounting
 				    if (stat_[pidx] == '1') 
 					    continue;
 
-				    if (ptag_[owner] == TAG_CPU) // CPU
-				    {   
-					    if (m >= prev_m_[pidx])
-					    {
+				    if (m >= prev_m_[pidx])
+				    {
+					    if (owner % shm_size_ >= ndevices_) // CPU
+					    {   
 						    if (sbuf_ctr_[pidx] == (bufsize_-1))
 						    {
 							    prev_m_[pidx] = m;
@@ -502,10 +504,7 @@ class TriangleCounting
 							    }
 						    }
 					    }
-				    }
-				    else // GPU
-				    {
-					    if (m >= prev_m_[pidx])
+					    else // GPU
 					    {
 						    if (sbuf_ctr_[pidx] == bufsize_)
 						    {
@@ -561,6 +560,205 @@ class TriangleCounting
 		    }
 	    }
     }
+
+#if 0
+    inline void lookup_edges_cpu()
+    {
+	    if (pdegree_ == 0)
+		    return;
+
+	    const GraphElem lnv = g_->get_lnv();
+
+	    for (GraphElem i = 0; i < lnv; i++)
+	    {
+		    if (vcount_[i] == 0) // all edges processed, move on
+			    continue;
+
+		    GraphElem e0, e1;
+		    g_->edge_range(i, e0, e1);
+		    GraphElem global_i = g_->local_to_global(i);
+
+		    if ((e0 + 1) == e1)
+			    continue;
+
+		    for (GraphElem m = e0; m < e1-1; m++)
+		    {
+			    EdgeStat& edge = g_->get_edge_stat(m);
+			    const int owner = g_->get_owner(edge.edge_->tail_);
+
+			    if (global_i >= edge.edge_->tail_)
+				    continue;
+
+			    if (edge.active_ && owner > rank_ && owner % shm_size_ >= ndevices_)
+			    {
+				    const GraphElem pidx = pindex_[owner];
+				    const GraphElem disp = pidx*bufsize_;
+
+				    if (stat_[pidx] == '1') 
+					    continue;
+
+				    if (m >= prev_m_[pidx])
+				    {
+					    if (sbuf_ctr_[pidx] == (bufsize_-1))
+					    {
+						    prev_m_[pidx] = m;
+						    prev_k_[pidx] = -1;
+
+						    nbsend(owner);
+
+						    continue;
+					    }
+
+					    sbuf_[disp+sbuf_ctr_[pidx]] = edge.edge_->tail_;
+					    sbuf_ctr_[pidx] += 1;
+
+					    for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
+					    {  
+						    Edge const& edge_n = g_->get_edge(n); 
+
+						    if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+							    break;
+
+						    if (sbuf_ctr_[pidx] == (bufsize_-1))
+						    {
+							    prev_m_[pidx] = m;
+							    prev_k_[pidx] = n;
+
+							    sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
+							    sbuf_ctr_[pidx] += 1;
+
+							    nbsend(owner);
+
+							    break;
+						    }
+
+						    if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
+							    continue;
+
+						    sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
+						    sbuf_ctr_[pidx] += 1;
+
+						    out_nghosts_ -= 1;
+						    vcount_[i] -= 1;
+					    }
+
+					    if (stat_[pidx] == '0') 
+					    {               
+						    prev_m_[pidx] = m;
+						    prev_k_[pidx] = -1;
+
+						    edge.active_ = false;
+
+						    if (sbuf_ctr_[pidx] == (bufsize_-1))
+						    {
+							    sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+							    sbuf_ctr_[pidx] += 1;
+
+							    nbsend(owner);
+						    }
+						    else
+						    {
+							    sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+							    sbuf_ctr_[pidx] += 1;
+						    }
+					    }
+				    }
+			    }
+		    }
+	    }
+    }
+
+    inline void lookup_edges_gpu()
+    {
+	    if (pdegree_ == 0)
+		    return;
+
+	    const GraphElem lnv = g_->get_lnv();
+
+	    for (GraphElem i = 0; i < lnv; i++)
+	    {
+		    if (vcount_[i] == 0) // all edges processed, move on
+			    continue;
+
+		    GraphElem e0, e1;
+		    g_->edge_range(i, e0, e1);
+		    GraphElem global_i = g_->local_to_global(i);
+
+		    if ((e0 + 1) == e1)
+			    continue;
+
+		    for (GraphElem m = e0; m < e1-1; m++)
+		    {
+			    EdgeStat& edge = g_->get_edge_stat(m);
+			    const int owner = g_->get_owner(edge.edge_->tail_);
+
+			    if (global_i >= edge.edge_->tail_)
+				    continue;
+
+			    if (edge.active_ && owner > rank_ && owner % shm_size_ < ndevices_)
+			    {
+				    const GraphElem pidx = pindex_[owner];
+				    const GraphElem disp = pidx*bufsize_;
+
+				    if (stat_[pidx] == '1') 
+					    continue;
+
+				    if (m >= prev_m_[pidx])
+				    {
+					    if (sbuf_ctr_[pidx] == bufsize_)
+					    {
+						    prev_m_[pidx] = m;
+						    prev_k_[pidx] = -1;
+
+						    nbsend(owner);
+
+						    continue;
+					    }
+
+					    for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
+					    { 
+						    Edge const& edge_n = g_->get_edge(n); 
+
+						    if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+							    break;
+
+						    if (sbuf_ctr_[pidx] == bufsize_)
+						    {
+							    prev_m_[pidx] = m;
+							    prev_k_[pidx] = n;
+
+							    nbsend(owner);
+
+							    break;
+						    }
+
+						    if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
+							    continue;
+
+						    sbuf_[disp+sbuf_ctr_[pidx]]   = edge.edge_->tail_;
+						    sbuf_[disp+sbuf_ctr_[pidx]+1] = edge_n.tail_;
+						    sbuf_ctr_[pidx] += 2;
+
+						    out_nghosts_ -= 2;
+						    vcount_[i] -= 1;
+					    }
+
+					    if (stat_[pidx] == '0') 
+					    {               
+						    prev_m_[pidx] = m;
+						    prev_k_[pidx] = -1;
+
+						    edge.active_ = false;
+
+						    if (sbuf_ctr_[pidx] == bufsize_)
+							    nbsend(owner);
+					    }
+				    }
+			    }
+		    }
+	    }
+    }
+#endif
         
     inline bool check_edgelist(GraphElem (&tup)[2])
     {
@@ -633,12 +831,11 @@ class TriangleCounting
 		    {
 			    int count = 0;
 			    const int source = rstat.MPI_SOURCE;
-			    const int tag = rstat.MPI_TAG;
 			    MPI_Get_count(&rstat, MPI_GRAPH_TYPE, &count);
 
 			    if (source != MPI_ANY_SOURCE)
 			    {
-				    if (tag == TAG_GPU)
+				    if (shm_rank_ < ndevices_)
 				    {
 					    const int s_idx = nst % count_rstreams_;
 					    CudaMemcpyAsyncHtoD(&d_rbuf_[s_idx*bufsize_], &rbuf_[p*bufsize_], count*sizeof(GraphElem), e_rstreams_[s_idx]);
@@ -675,13 +872,13 @@ class TriangleCounting
 
 							    if (check_edgelist(tup))
 								    ntriangles_ += 1;
+
+							    in_nghosts_ -= 1;
+							    recv_count_[source] -= 1;
 						    }
 
 						    k += (curr_count - prev);
 						    prev = k;
-
-						    in_nghosts_ -= 1;
-						    recv_count_[source] -= 1;
 					    }
 				    }
 
@@ -752,14 +949,15 @@ class TriangleCounting
 #endif
       }
    
-      for (int t = 0; t < count_rstreams_; t++)
-        cudaStreamDestroy(e_rstreams_[t]);
-      CudaDeviceSynchronize();
-      
       GraphElem gpu_ntriangles = 0;
-
       if (shm_rank_ < ndevices_)
+      {
+	      for (int t = 0; t < count_rstreams_; t++)
+		      cudaStreamDestroy(e_rstreams_[t]);
+	      CudaDeviceSynchronize();
+
 	      CudaMemcpyDtoH(&gpu_ntriangles, d_ntriangles_, sizeof(GraphElem));
+      }
 
       GraphElem ttc = 0, ltc = ntriangles_ + gpu_ntriangles;
       MPI_Barrier(comm_);
@@ -787,7 +985,7 @@ class TriangleCounting
 
     int rank_, size_, shm_rank_, shm_size_, ndevices_;
     std::vector<int> targets_, sources_;
-    std::unordered_map<int, int> pindex_, rindex_, ptag_; 
+    std::unordered_map<int, int> pindex_, rindex_; 
     
     MPI_Comm comm_, shm_comm_;
 };
