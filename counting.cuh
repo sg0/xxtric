@@ -169,6 +169,7 @@ CudaCall(cudaDeviceSynchronize())
 #endif
 
 #define FULL_MASK      (0xFFFFFFFF) 
+#define TB_PER_CLUSTER (16)
 
 __device__ 
 GraphElem lower_bound
@@ -191,7 +192,7 @@ __device__ void count_if_edge_exists
  GraphElem e0, 
  GraphElem e1, 
  GraphElem se, 
- volatile GraphElem* s_edge_list,
+ const GraphElem* __restrict__ d_edge_list,
  GraphElem& t_count
  );
 
@@ -268,8 +269,8 @@ void single_gpu_count_kernel
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
 );
-
- void local_count_gpu_masked
+ 
+void local_count_gpu_masked
 (
  const GraphElem nedges,
  const GraphElem base,
@@ -280,6 +281,19 @@ void single_gpu_count_kernel
  cudaStream_t stream
 );
 
+#if defined(USE_CG_CLUSTER_GROUP)
+template <int tilesize, int blocksize>
+__global__  
+ void local_count_gpu_masked_cgcluster_kernel
+(
+ const GraphElem nedges,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+);
+#else
 template <int tilesize, int blocksize>
 __global__  
  void local_count_gpu_masked_kernel
@@ -291,6 +305,7 @@ __global__
  const GraphElem* __restrict__ d_edge_list,
  GraphElem* __restrict__ d_local_count
 );
+#endif
 
  void local_count_gpu_inner
 (

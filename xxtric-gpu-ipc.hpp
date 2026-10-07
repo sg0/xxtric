@@ -277,9 +277,6 @@ class TriangleCounting
 #endif
 
 #if defined(USE_SEPARATE_KERNELS)
-    for (int t = 0; t < size_; t++)
-      edge_mask_nbr[t].clear();
-    edge_mask_nbr.clear();
     edge_mask.clear();
 #else    
     for (int t = 0; t < size_; t++)

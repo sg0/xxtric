@@ -5,6 +5,7 @@
 
 #include <cooperative_groups.h> 
 #include <cooperative_groups/memcpy_async.h>
+#include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
 //#if defined(USE_ASYNC_MEMCPY)
 //#if defined(__CUDA_MINIMUM_ARCH__) && __CUDA_MINIMUM_ARCH__ < 900
@@ -16,6 +17,8 @@ namespace cg = cooperative_groups;
 using barrier = cuda::barrier<cuda::thread_scope_block>;
 //namespace cde = cuda::device::experimental;
 //#endif
+
+#include "tensor.cuh"
 
 inline __device__ GraphElem lower_bound
 (
@@ -161,7 +164,134 @@ inline __device__ void count_if_edge_exists_smem
     }
   }
 }
- 
+
+inline __device__ void count_if_edge_exists_wmma
+(
+ GraphElem s1,
+ GraphElem se, 
+ volatile int* t_frag,
+ GraphElem& t_count
+ )
+{
+  GraphElem beg = 0, end = s1, mid = midpoint(beg, end);
+  const GraphElem s_first = (GraphElem)t_frag[beg];
+  const GraphElem s_last  = (GraphElem)t_frag[end-1];
+
+  if (se == s_first || se == s_last)
+  {
+    t_count += 1;
+    return;
+  }
+
+  if (se > s_first && se < s_last)
+  {
+    while (end > beg) 
+    { 
+      if ((GraphElem)(t_frag[mid]) == se)
+      {
+        t_count += 1;
+        return;
+      }
+      else if ((GraphElem)(t_frag[mid]) < se)
+        beg = mid + 1;
+      else
+        end = mid;
+    
+      mid = midpoint(beg, end);
+    }
+  }
+}
+
+ void single_gpu_count_wmma
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+ )
+{
+  const int blocksize = BLOCKDIM03;
+  const int tilesize = TILESIZE01;
+  GraphElem nblocks = (nedges + (blocksize/tilesize) - 1) / (blocksize/tilesize);
+  nblocks = (nblocks > MAX_GRIDDIM) ? MAX_GRIDDIM : nblocks;
+
+  single_gpu_count_wmma_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(nedges, d_edge_mask, d_indices, d_edge_list, d_local_count);
+}
+
+template <int tilesize, int blocksize>
+__global__  
+ void single_gpu_count_wmma_kernel
+(
+ const GraphElem nedges,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+)
+{
+  static_assert(blocksize % tilesize == 0, "Block size must be a multiple of tile size");
+
+  const GraphElem bid = blockIdx.x, step = gridDim.x;
+  const int WarpSize = tilesize, BlockSize = blocksize;
+  __shared__ GraphElem range[(BlockSize/WarpSize)*2];
+
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_group warp = cg::tiled_partition<WarpSize>(block);
+
+  const GraphElem block_tid = block.thread_rank();
+  const GraphElem warp_tid = warp.thread_rank();
+  
+  const int tensorslots = 16;
+  wmma::fragment<wmma::accumulator, 16, 16, 16, int> acc_frag; 
+  int* t_frag = &acc_frag.x[(block_tid/WarpSize)*tensorslots];
+
+  GraphElem* t_range = &range[(block_tid/WarpSize)*2];
+  GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+  GraphElem count = 0;
+
+  for (GraphElem i = i0; i < nedges; i += step*(BlockSize/WarpSize))
+  {
+    if(warp_tid == 0)
+    {
+      const GraphElem id = 2*i;
+      t_range[0] = d_edge_mask[id];
+      t_range[1] = d_edge_mask[id+1];
+    }
+
+    warp.sync();
+
+    const GraphElem e_end = t_range[0];
+    const GraphElem m = t_range[1];
+
+    const GraphElem edge_m = d_edge_list[m];
+    const GraphElem jstart = d_indices[edge_m];
+    const GraphElem jend = d_indices[edge_m+1];
+
+    for (GraphElem k = jstart; k < jend; k += tensorslots)
+    {
+      const GraphElem t_range = MIN(k + tensorslots, jend);
+      const GraphElem t_count = t_range - k;
+
+      for (GraphElem t = k; t < t_range; t++)
+        t_frag[(int)(t-k)] = (int)(d_edge_list[t]);
+
+#pragma unroll
+      for (GraphElem n = m+1+warp_tid; n < e_end; n += WarpSize)
+        count_if_edge_exists_wmma(t_count, d_edge_list[n], t_frag, count);
+
+      warp.sync(); 
+    }
+  }
+
+#pragma unroll
+  for(int j = warp.size()/2; j > 0; j /= 2)
+    count += __shfl_down_sync(FULL_MASK, count, j);
+
+  if (warp_tid == 0)
+    atomicAdd((unsigned long long int*)d_local_count, count);
+}
+
 void single_gpu_count_masked
 (
  const GraphElem nedges,
@@ -176,7 +306,11 @@ void single_gpu_count_masked
   GraphElem nblocks = (nedges + (blocksize/tilesize) - 1) / (blocksize/tilesize);
   nblocks = (nblocks > MAX_GRIDDIM) ? MAX_GRIDDIM : nblocks;
 
+#if defined(USE_CUDA_WMMA_PREFETCH)
+  single_gpu_count_wmma_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(nedges, d_edge_mask, d_indices, d_edge_list, d_local_count);
+#else
   single_gpu_count_masked_kernel<tilesize, blocksize><<<nblocks, blocksize>>>(nedges, d_edge_mask, d_indices, d_edge_list, d_local_count);
+#endif
 }
 
 void single_gpu_count_masked
@@ -854,34 +988,158 @@ void local_count_gpu_masked
   const int tilesize = TILESIZE01;
   const GraphElem nblocks = (nedges + blocksize - 1) / blocksize;
 
-#if defined(CALC_WARP_OCCUPANCY)
-    int device, numBlocks;
-    cudaDeviceProp prop;
-    int activeWarps;
-    int maxWarps;
-    int len = 15;
-    char gpu_id[15];
+#if defined(USE_CG_CLUSTER_GROUP)
+  int clustersize;
+  for (int k = 1; k <= std::max(TB_PER_CLUSTER,1); k*=2)
+  {
+    if (nblocks % k == 0)
+      clustersize = k;
+  }
+  int device;
+  cudaGetDevice(&device);
+  cudaDeviceProp props;
+  cudaGetDeviceProperties(&props, device);
 
-    cudaGetDevice(&device);
-    cudaGetDeviceProperties(&prop, device);
+  if (props.major >= 9) 
+  {  
+    // launch configuration
+    cudaLaunchConfig_t config = {0};
+    config.gridDim = nblocks;
+    config.blockDim = blocksize;
+    config.stream = stream;
+    config.dynamicSmemBytes = clustersize*sizeof(GraphElem);
 
-    cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-        &numBlocks,
-        local_count_gpu_masked3_kernel<TILESIZE01, blocksize>,
-        blocksize,
-        0);
+    // cluster dimension attribute
+    cudaLaunchAttribute attribute[1];
+    attribute[0].id = cudaLaunchAttributeClusterDimension;
+    attribute[0].val.clusterDim.x = clustersize; 
+    attribute[0].val.clusterDim.y = 1;
+    attribute[0].val.clusterDim.z = 1;
 
-    cudaDeviceGetPCIBusId(gpu_id, len, device);
-    std::string str_gpu(gpu_id);
-    
-    activeWarps = numBlocks * blocksize / prop.warpSize;
-    maxWarps = prop.maxThreadsPerMultiProcessor / prop.warpSize;
+    config.attrs = attribute;
+    config.numAttrs = 1;
 
-    std::cout << "Masked(3) Kernel Occupancy (" << str_gpu << "): " << (double)activeWarps / maxWarps * 100 << "%" << std::endl;
-#endif  
+    cudaError_t err = 
+      cudaLaunchKernelEx(
+        &config,
+        local_count_gpu_masked_cgcluster_kernel<tilesize, blocksize>, 
+        nedges, 
+        base, 
+        d_edge_mask, 
+        d_indices, 
+        d_edge_list, 
+        d_local_count
+        );
+    if (err != cudaSuccess)
+      std::cerr << "CUDA Launch Error: " << cudaGetErrorString(err) << std::endl;
+  }
+  else
+    std::cerr << "Insufficient CUDA Compute Capability: cg::cluster_group is not available." << std::endl;
+#else
   local_count_gpu_masked_kernel<tilesize, blocksize><<<nblocks, blocksize, 0, stream>>>(nedges, base, d_edge_mask, d_indices, d_edge_list, d_local_count);
+#endif
 }
 
+#if defined(USE_CG_CLUSTER_GROUP)
+template <int tilesize, int blocksize>
+__global__ 
+void local_count_gpu_masked_cgcluster_kernel
+(
+ const GraphElem nedges,
+ const GraphElem base,
+ const GraphElem* __restrict__ d_edge_mask,
+ const GraphElem* __restrict__ d_indices,
+ const GraphElem* __restrict__ d_edge_list,
+ GraphElem* __restrict__ d_local_count
+ )
+{
+  static_assert(blocksize % tilesize == 0, "Block size must be a multiple of tile size");
+  
+  const GraphElem bid = blockIdx.x, step = gridDim.x;
+  const int WarpSize = tilesize, BlockSize = blocksize;
+  __shared__ GraphElem range[(BlockSize/WarpSize)*2];
+
+  cg::cluster_group cluster = cg::this_cluster();
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<WarpSize> warp = cg::tiled_partition<WarpSize>(block);
+
+  const GraphElem cluster_size = cluster.dim_blocks().x;
+  const GraphElem cluster_tid = cluster.block_rank();
+
+  const GraphElem block_tid = block.thread_rank();
+  const GraphElem warp_tid = warp.thread_rank();
+
+  GraphElem* t_range = &range[(block_tid/WarpSize)*2];
+  GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+  GraphElem count = 0;
+
+  for (GraphElem i = i0; i < nedges; i += step*(BlockSize/WarpSize))
+  {
+    if(warp_tid == 0)
+    {
+      const GraphElem id = 2*i;
+      t_range[0] = d_edge_mask[id];
+      t_range[1] = d_edge_mask[id+1];
+    }
+
+    warp.sync();
+
+    const GraphElem e_end = t_range[0];
+    const GraphElem m = t_range[1];
+    
+    const GraphElem edge_m = d_edge_list[m];
+    const GraphElem base_edge_m = edge_m-base;
+    const GraphElem jstart = d_indices[base_edge_m];
+    const GraphElem jend = d_indices[base_edge_m+1];
+
+    for(GraphElem n = m + 1 + warp_tid; n < e_end; n += WarpSize)
+      count_if_edge_exists(jstart, jend, d_edge_list[n], d_edge_list, count);
+  }
+    
+  count = cg::reduce(warp, count, cg::plus<GraphElem>());
+  
+  const GraphElem num_warps = BlockSize/WarpSize;
+  const GraphElem warp_id = block_tid / WarpSize;
+	__shared__ GraphElem block_smem[num_warps]; 
+  extern __shared__ GraphElem cluster_smem[];
+   
+  if (warp_tid == 0)
+    block_smem[warp_id] = count;
+  
+  block.sync();
+
+  // block-level reduction
+  GraphElem block_sum = 0;
+
+  if (warp_id == 0)
+  {
+    GraphElem warp_result = (warp_tid < num_warps) ? block_smem[warp_tid] : 0;
+    block_sum = cg::reduce(warp, warp_result, cg::plus<GraphElem>());
+  }
+
+  // cluster level reduction
+  if (block_tid == 0)
+    block_smem[0] = block_sum;
+
+  block.sync();
+	cluster.sync(); 
+
+  if (block_tid == 0) 
+  {
+    GraphElem cluster_sum = 0;
+
+#pragma unroll
+    for (int b = 0; b < cluster_size; ++b) 
+    {
+      GraphElem* remote = cluster.map_shared_rank(block_smem, b);  
+      cluster_sum += remote[0];
+    }
+
+    if (cluster_tid == 0)
+      atomicAdd((unsigned long long int*)d_local_count, cluster_sum);
+  }
+}
+#else
 template <int tilesize, int blocksize>
 __global__  
  void local_count_gpu_masked_kernel
@@ -940,6 +1198,7 @@ __global__
   if (warp_tid == 0)
     atomicAdd((unsigned long long int*)d_local_count, count);
 }
+#endif
 
 void local_count_gpu_masked_ext
 (
