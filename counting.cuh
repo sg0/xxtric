@@ -1,4 +1,3 @@
-
 #pragma once
 #ifndef COUNTING_CUH
 #define COUNTING_CUH
