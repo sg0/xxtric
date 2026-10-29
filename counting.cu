@@ -986,15 +986,13 @@ void local_count_gpu_masked
 {
   const int blocksize = BLOCKDIM03;
   const int tilesize = TILESIZE01;
-  const GraphElem nblocks = (nedges + blocksize - 1) / blocksize;
+  GraphElem nblocks = (nedges + blocksize - 1) / blocksize;
 
 #if defined(USE_CG_CLUSTER_GROUP)
-  int clustersize;
-  for (int k = 1; k <= std::max(TB_PER_CLUSTER,1); k*=2)
-  {
-    if (nblocks % k == 0)
-      clustersize = k;
-  }
+  const int clustersize = std::max(TB_PER_CLUSTER,1);
+  // pad grid dimension
+  nblocks = ((nblocks + clustersize - 1) / clustersize) * clustersize;
+
   int device;
   cudaGetDevice(&device);
   cudaDeviceProp props;
@@ -1007,7 +1005,7 @@ void local_count_gpu_masked
     config.gridDim = nblocks;
     config.blockDim = blocksize;
     config.stream = stream;
-    config.dynamicSmemBytes = clustersize*sizeof(GraphElem);
+    //config.dynamicSmemBytes = clustersize*sizeof(GraphElem);
 
     // cluster dimension attribute
     cudaLaunchAttribute attribute[1];
@@ -1054,7 +1052,7 @@ void local_count_gpu_masked_cgcluster_kernel
  )
 {
   static_assert(blocksize % tilesize == 0, "Block size must be a multiple of tile size");
-  
+ 
   const GraphElem bid = blockIdx.x, step = gridDim.x;
   const int WarpSize = tilesize, BlockSize = blocksize;
   __shared__ GraphElem range[(BlockSize/WarpSize)*2];
@@ -1063,17 +1061,19 @@ void local_count_gpu_masked_cgcluster_kernel
   cg::thread_block block = cg::this_thread_block();
   cg::thread_block_tile<WarpSize> warp = cg::tiled_partition<WarpSize>(block);
 
-  const GraphElem cluster_size = cluster.dim_blocks().x;
   const GraphElem cluster_tid = cluster.block_rank();
-
   const GraphElem block_tid = block.thread_rank();
   const GraphElem warp_tid = warp.thread_rank();
 
-  GraphElem* t_range = &range[(block_tid/WarpSize)*2];
-  GraphElem i0 = (block_tid/WarpSize)+(BlockSize/WarpSize)*bid;
+  const GraphElem WarpsPerBlock = BlockSize / WarpSize;
+  const GraphElem WarpsPerGrid = step * WarpsPerBlock;
+
+  const GraphElem warpID = block_tid / WarpSize;
+  GraphElem* t_range = &range[warpID*2];
+  GraphElem i0 =  warpID + (WarpsPerBlock * bid);
   GraphElem count = 0;
 
-  for (GraphElem i = i0; i < nedges; i += step*(BlockSize/WarpSize))
+  for (GraphElem i = i0; i < nedges; i += WarpsPerGrid)
   {
     if(warp_tid == 0)
     {
@@ -1096,48 +1096,48 @@ void local_count_gpu_masked_cgcluster_kernel
       count_if_edge_exists(jstart, jend, d_edge_list[n], d_edge_list, count);
   }
     
+  // warp-level reduction
+	__shared__ GraphElem block_smem[WarpsPerBlock]; 
+  __shared__ GraphElem block_total_sum; 
   count = cg::reduce(warp, count, cg::plus<GraphElem>());
   
-  const GraphElem num_warps = BlockSize/WarpSize;
-  const GraphElem warp_id = block_tid / WarpSize;
-	__shared__ GraphElem block_smem[num_warps]; 
-  extern __shared__ GraphElem cluster_smem[];
-   
   if (warp_tid == 0)
-    block_smem[warp_id] = count;
+    block_smem[warpID] = count;
   
   block.sync();
 
-  // block-level reduction
-  GraphElem block_sum = 0;
-
-  if (warp_id == 0)
+  // partial block-level reduction 
+  if (warpID == 0)
   {
-    GraphElem warp_result = (warp_tid < num_warps) ? block_smem[warp_tid] : 0;
-    block_sum = cg::reduce(warp, warp_result, cg::plus<GraphElem>());
+    GraphElem warp_result = (warp_tid < WarpsPerBlock) ? block_smem[warp_tid] : 0;
+    GraphElem block_sum = cg::reduce(warp, warp_result, cg::plus<GraphElem>());
+
+    if (warp_tid == 0)
+      block_total_sum = block_sum; 
   }
+ 
+	// cluster level reduction
+  cluster.sync(); 
+  GraphElem cluster_partial = 0;
+  const GraphElem cluster_size = cluster.dim_blocks().x;
 
-  // cluster level reduction
-  if (block_tid == 0)
-    block_smem[0] = block_sum;
-
-  block.sync();
-	cluster.sync(); 
-
-  if (block_tid == 0) 
-  {
-    GraphElem cluster_sum = 0;
-
-#pragma unroll
-    for (int b = 0; b < cluster_size; ++b) 
+  if (cluster_tid == 0)
+  { 
+    if (warpID == 0) 
     {
-      GraphElem* remote = cluster.map_shared_rank(block_smem, b);  
-      cluster_sum += remote[0];
-    }
+      for (GraphElem r = warp_tid; r < cluster_size; r += WarpSize)
+      {
+        GraphElem* remote_smem = cluster.map_shared_rank(&block_total_sum, r);
+        cluster_partial = *remote_smem;
+      }
 
-    if (cluster_tid == 0)
-      atomicAdd((unsigned long long int*)d_local_count, cluster_sum);
+      GraphElem cluster_sum = cg::reduce(warp, cluster_partial, cg::plus<GraphElem>());
+
+      if (warp_tid == 0)
+        atomicAdd((unsigned long long int*)d_local_count, (unsigned long long int)cluster_sum);
+    }
   }
+  cluster.sync(); 
 }
 #else
 template <int tilesize, int blocksize>

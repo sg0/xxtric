@@ -169,7 +169,12 @@ CudaCall(cudaDeviceSynchronize())
 #endif
 
 #define FULL_MASK      (0xFFFFFFFF) 
-#define TB_PER_CLUSTER (16)
+
+#ifdef USE_CG_CLUSTER_GROUP
+#ifndef TB_PER_CLUSTER
+#define TB_PER_CLUSTER (8)
+#endif
+#endif
 
 __device__ 
 GraphElem lower_bound
