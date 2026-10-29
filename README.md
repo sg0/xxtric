@@ -22,17 +22,17 @@ with compiler flags and use a C++17 compliant compiler of your choice. Invoke `m
 after setting paths to MPI and CUDA for generating the binary. Use `mpirun` or `mpiexec` or `srun` to 
 execute the code with specific runtime arguments mentioned in the next section.
 
-Pass -DPRINT_DIST_STATS while building for printing distributed graph characteristics. Relevant macros:
+Pass `-DPRINT_DIST_STATS` while building for printing distributed graph characteristics. Relevant macros:
 
-1. `USE_CUDA`: standard multi-node CUDA + MPI based counting ($$PPN == \#devices$$), use `USE_SINGLE_DEVICE` in addition for single-device counting.
+1. `-DUSE_CUDA`: standard multi-node CUDA + MPI based counting ($PPN == \#devices$), use `-DUSE_SINGLE_DEVICE` in addition for single-device counting.
 
-2. `USE_CUDA_CPU`: hybrid multi-node CPU and GPU counting ($$PPN > \#devices$$).
+2. `-DUSE_CUDA_CPU`: hybrid multi-node CPU and GPU counting ($PPN > \#devices$).
 
-3. `USE_CUDA_IPC`: single-node CUDA IPC variant ($$\#processes == \#devices$$); `USE_CG_CLUSTER_GROUP` to enable cluster-based reduction within a device (on Hopper).
+3. `-DUSE_CUDA_IPC`: single-node CUDA IPC variant ($\#processes == \#devices$); `-DUSE_CG_CLUSTER_GROUP` to enable cluster-based reduction within a device (on Hopper).
 
-4. `USE_CUDA_IPC_MPI`: multi-node MPI and CUDA IPC (peer copy between devices/node, and MPI communication for inter-node transfers)
+4. `-DUSE_CUDA_IPC_MPI`: multi-node MPI and CUDA IPC (peer copy between devices/node, and MPI communication for inter-node transfers)
 
-5. Default: multi-node MPI CPU based counting; use `COMPRESS_COMM_BUFFERS` to enable outgoing/incoming buffer compression via LZ4.
+5. Default: multi-node MPI CPU based counting; use `-DCOMPRESS_COMM_BUFFERS` to enable outgoing/incoming buffer compression via LZ4.
 
 There are other macros which can be enabled to study performance variations
 (see respective header or CUDA implementation). 
