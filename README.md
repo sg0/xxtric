@@ -24,11 +24,11 @@ execute the code with specific runtime arguments mentioned in the next section.
 
 Pass `-DPRINT_DIST_STATS` while building for printing distributed graph characteristics. Relevant macros:
 
-1. `-DUSE_CUDA`: standard multi-node CUDA + MPI based counting ($PPN == \#devices$), use `-DUSE_SINGLE_DEVICE` in addition for single-device counting.
+1. `-DUSE_CUDA`: standard multi-node CUDA + MPI based counting ($PPN == \\#devices$), use `-DUSE_SINGLE_DEVICE` in addition for single-device counting.
 
-2. `-DUSE_CUDA_CPU`: hybrid multi-node CPU and GPU counting ($PPN > \#devices$).
+2. `-DUSE_CUDA_CPU`: hybrid multi-node CPU and GPU counting ($PPN > \\#devices$).
 
-3. `-DUSE_CUDA_IPC`: single-node CUDA IPC variant ($\#processes == \#devices$); `-DUSE_CG_CLUSTER_GROUP` to enable cluster-based reduction within a device (on Hopper).
+3. `-DUSE_CUDA_IPC`: single-node CUDA IPC variant ($\\#processes == \\#devices$); `-DUSE_CG_CLUSTER_GROUP` to enable cluster-based reduction within a device (on Hopper).
 
 4. `-DUSE_CUDA_IPC_MPI`: multi-node MPI and CUDA IPC (peer copy between devices/node, and MPI communication for inter-node transfers)
 
