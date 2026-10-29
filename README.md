@@ -2,7 +2,7 @@
 
 `xxtric` is a distributed-memory exact triangle counting code that assumes a 1-D vertex-based 
 distribution of a graph. There are several GPU variants as well, tested on contemporary scale-out 
-and scale-up based NVIDIA&reg GPU platforms (considering NVIDIA&reg "Ampere" and "Hopper" architectures). 
+and scale-up based NVIDIA&reg; GPU platforms (considering NVIDIA&reg; "Ampere" and "Hopper" architectures). 
 `xxtric` adopts standard vertex-numbering based precedence rules to facilitate
 single counting across GPUs and CPUs. 
 
