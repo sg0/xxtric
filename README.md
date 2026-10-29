@@ -49,6 +49,7 @@ mpiexec -n 2 bin/./tric -p 2 -n 100
 
 Possible options (can be combined):
 
+```bash
 1.  -f <bin-file>   : Specify input binary file after this argument. 
 2.  -b              : Only valid for real-world inputs. Attempts to distribute approximately 
                       equal number of edges among processes. Irregular number of vertices
@@ -69,3 +70,4 @@ Possible options (can be combined):
                       naggr := (nranks > 1) ? (nprocs/nranks) : nranks;
 8.  -s <size>       : Buffer size, only relevant when -DAGGR_<> is passed for aggregate-buffered 
                       triangle counting. Default buffer size can be set by updating DEFAULT_BUF_SIZE. 
+```
