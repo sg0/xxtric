@@ -31,7 +31,7 @@ ifeq ($(ENABLE_CUDA),1)
 NVCXX = nvcc
 MPI_PATH = /share/apps/openmpi/5.0.5/gcc/12.2.0
 CUDA_PATH = /share/apps/cuda/12.3
-CXXFLAGS += -DUSE_CUDA
+CXXFLAGS += -DUSE_CUDA #-DUSE_CUDA_IPC #-DUSE_CG_CLUSTER_GROUP #-DUSE_SINGLE_DEVICE
 CUDA_CXXFLAGS = -gencode arch=compute_90,code=sm_90 
 INCLUDE += -I$(MPI_PATH)/include -I$(CUDA_PATH)/include 
 LDFLAGS += -lm -lrt -ldl -L$(MPI_PATH)/lib -lmpi -L$(CUDA_PATH)/lib64 -lcudart
