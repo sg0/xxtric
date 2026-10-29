@@ -6,11 +6,11 @@ and scale-up based NVIDIA&reg GPU platforms (considering NVIDIA&reg "Ampere" and
 `xxtric` adopts standard vertex-numbering based precedence rules to facilitate
 single counting across GPUs and CPUs. 
 
-![Distributed counting precedence rules](image/distributed-counting-precedence.pdf)
+![Distributed counting precedence rules](image/distributed-counting-precedence.png)
 
-Papers:
+Paper: 
 
-[1] Ghosh S. Enumeration-based Triangle Counting on GPUs. arXiv preprint arXiv:2610.29988. 2026 Oct 21.
+Ghosh S. Enumeration-based Triangle Counting on GPUs. arXiv preprint arXiv:2610.29988. 2026 Oct 21.
 
 Please `*` this repository if you find it useful.
 
