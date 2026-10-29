@@ -543,9 +543,9 @@ class TriangleCounting
     for (int t = 0; t < MAX_CUDA_STREAMS; t++)
       cudaStreamCreate(&streams[t]);
 
-    for (GraphElem i = 0; i < nv; i++)
+    for (GraphElem i = 0; i < lnv; i++)
     {
-      GraphElem e0, e1v;
+      GraphElem e0, e1;
       g_->edge_range(i, e0, e1);
       const GraphElem global_i = g_->local_to_global(i);
       
@@ -923,6 +923,9 @@ class TriangleCounting
             nst++;
 #endif
 
+#if defined(USE_OPENMP)
+#pragma omp atomic update
+#endif
             in_nghosts_ -= count;
 #if defined(USE_OPENMP)
 #pragma omp atomic update

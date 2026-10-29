@@ -176,6 +176,94 @@ void linear_partition(GraphElem* seq, GraphElem n, GraphElem k, GraphElem* bins)
         bins[j] += bins[j-1];
 }
 
+/// Compression
+#if defined(COMPRESS_COMM_BUFFERS)
+#include "lz4.h"
+
+template <typename T>
+class Compress
+{
+    public:
+        Compress(): size_(-1), csize_(-1), buf_(nullptr), cbuf_(nullptr) {}
+        Compress(size_t count): 
+            size_(count*sizeof(T)), csize_(-1), buf_(nullptr), cbuf_(nullptr)
+        { 
+            ubsize_ = compress_ub(count*sizeof(T));
+            buf_ = new char[ubsize_]; 
+        }
+
+        ~Compress() { delete []buf_; }
+
+        size_t compress_ub(const size_t size) const { return LZ4_compressBound(size); }
+        size_t compress_sz() const { return csize_; }
+        
+        void set(size_t count, T* cptr)
+        {
+            cbuf_ = cptr;
+            size_ = count*sizeof(T);
+            
+            ubsize_ = compress_ub(size_);
+            buf_ = new char[ubsize_]; 
+        }
+        
+        size_t compress()
+        { 
+            csize_ = LZ4_compress_default(reinterpret_cast<const char*>(cbuf_), buf_, size_, ubsize_); 
+            assert(csize_ > 0);
+            return csize_;
+        }
+        
+        size_t compress(size_t input_sz)
+        { 
+            csize_ = LZ4_compress_default(reinterpret_cast<const char*>(cbuf_), buf_, input_sz, ubsize_); 
+            assert(csize_ > 0);
+            return csize_;
+        }
+
+        char* get_cptr() const { return buf_; }
+        
+    private:
+        T* cbuf_;
+        char* buf_;
+        size_t ubsize_, size_, csize_;
+};
+
+template <typename T>
+class Decompress
+{
+    public:
+        Decompress(): dbuf_(nullptr), size_(-1), dsize_(-1) {}
+        Decompress(size_t count): dbuf_(nullptr), size_(count*sizeof(T)), dsize_(-1) {}
+        Decompress(T* dptr, size_t count): dbuf_(dptr), size_(count*sizeof(T)), dsize_(-1) {}
+        ~Decompress() {}
+
+        void set(size_t count, T* dptr)
+        {
+            dbuf_ = dptr;
+            size_ = count*sizeof(T);
+            
+            ubsize_ = compress_ub(size_);
+            buf_ = new char[ubsize_]; 
+        }
+
+        size_t compress_ub(const size_t size) const { return LZ4_compressBound(size); }
+        
+        size_t decompress(const size_t csize)
+        {
+            dsize_ = LZ4_decompress_safe(buf_, reinterpret_cast<char*>(dbuf_), csize, size_);
+            assert(dsize_ > 0);
+            return dsize_;
+        }       
+        
+        char* get_cptr() { return buf_; }
+        GraphElem* get_dptr() { return dbuf_; }
+    private:
+        char* buf_;
+        T* dbuf_;
+        size_t size_, dsize_, ubsize_;
+};
+#endif
+
 // Local random number generator 
 template<typename T, typename G = std::default_random_engine>
 T genRandom(T lo, T hi)
