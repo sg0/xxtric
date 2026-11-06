@@ -30,9 +30,11 @@ Pass `-DPRINT_DIST_STATS` while building for printing distributed graph characte
 
 3. `-DUSE_CUDA_IPC`: single-node CUDA IPC variant ($\\#processes == \\#devices$); `-DUSE_CG_CLUSTER_GROUP` to enable cluster-based reduction within a device (on Hopper).
 
-4. `-DUSE_CUDA_IPC_MPI`: multi-node MPI and CUDA IPC (peer copy between devices/node, and MPI communication for inter-node transfers)
+4. `-DUSE_CUDA_IPC_MPI`: multi-node MPI and CUDA IPC (peer copy between devices/node, and MPI communication for inter-node transfers), $PPN == \\#devices$.
 
-5. Default: multi-node MPI CPU based counting; use `-DCOMPRESS_COMM_BUFFERS` to enable outgoing/incoming buffer compression via LZ4.
+5. `-DUSE_CUDA_VMM_MPI`: multi-node CUDA-aware MPI and VMM (peer copy between devices/node, and MPI communication for inter-node transfers), $PPN == 1$.
+
+6. Default: multi-node MPI CPU based counting; use `-DCOMPRESS_COMM_BUFFERS` to enable outgoing/incoming buffer compression via LZ4.
 
 There are other macros which can be enabled to study performance variations
 (see respective header or CUDA implementation). 
