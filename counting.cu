@@ -6,6 +6,8 @@
 #include <cooperative_groups.h> 
 #include <cooperative_groups/memcpy_async.h>
 #include <cooperative_groups/reduce.h>
+#include <cub/cub.cuh>
+
 namespace cg = cooperative_groups;
 //#if defined(USE_ASYNC_MEMCPY)
 //#if defined(__CUDA_MINIMUM_ARCH__) && __CUDA_MINIMUM_ARCH__ < 900
@@ -1321,3 +1323,429 @@ void local_count_cpu_recv
     }
   }
 }
+
+#if defined(USE_CUDA_VMM_MPI)
+
+#ifndef VMM_BLOCK
+#define VMM_BLOCK (256)
+#endif
+#ifndef VMM_TILE
+#define VMM_TILE (32)   // threads cooperating on one edge in the intra-node kernel
+#endif
+
+// ===========================================================================
+// Device helpers
+// ===========================================================================
+
+/// first i in [lo, hi) with a[i] >= x (hi if none)
+template <typename T>
+__device__ __forceinline__ GraphElem dlower(const T* __restrict__ a, GraphElem lo, GraphElem hi, T x)
+{
+  while (lo < hi) {
+    const GraphElem mid = lo + ((hi - lo) >> 1);
+    if (a[mid] < x) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
+
+/// first i in [lo, hi) with a[i] > x (hi if none)
+template <typename T>
+__device__ __forceinline__ GraphElem dupper(const T* __restrict__ a, GraphElem lo, GraphElem hi, T x)
+{
+  while (lo < hi) {
+    const GraphElem mid = lo + ((hi - lo) >> 1);
+    if (a[mid] <= x) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
+
+__device__ __forceinline__ bool dcontains(const GraphElem* __restrict__ a, GraphElem n, GraphElem x)
+{
+  if (n <= 0 || x < a[0] || x > a[n - 1]) return false;
+  const GraphElem i = dlower(a, GraphElem(0), n, x);
+  return i < n && a[i] == x;
+}
+
+/// GPU of this node owning global vertex v (v must be node-local).
+__device__ __forceinline__ int owner_gpu(const NodeCSR& c, GraphElem v)
+{
+  // last h with vsplit[h] <= v
+  return (int)(dupper(c.vsplit, GraphElem(0), (GraphElem)c.ngpus, v) - 1);
+}
+
+/// Adjacency of a node-local vertex v (may live on a peer GPU: VMM zero copy).
+__device__ __forceinline__ const GraphElem* node_adj(const NodeCSR& c, GraphElem v, GraphElem& deg)
+{
+  const int h = owner_gpu(c, v);
+  const GraphElem lv = v - c.vsplit[h];
+  const GraphElem a0 = c.ind[h][lv], a1 = c.ind[h][lv + 1];
+  deg = a1 - a0;
+  return c.lst[h] + a0;
+}
+
+/// Source (local index) of local edge e of GPU g: ind[l] <= e < ind[l+1].
+__device__ __forceinline__ GraphElem edge_source(const GraphElem* __restrict__ ind, GraphElem nv, GraphElem e)
+{
+  return dupper(ind, GraphElem(0), nv + 1, e) - 1;
+}
+
+static int sm_count()
+{
+  int dev = 0, n = 0;
+  CudaCall(cudaGetDevice(&dev));
+  CudaCall(cudaDeviceGetAttribute(&n, cudaDevAttrMultiProcessorCount, dev));
+  return n > 0 ? n : 1;
+}
+
+static unsigned grid_for(GraphElem work, int per_block, int blocks_per_sm = 32)
+{
+  const GraphElem need = (work + per_block - 1) / per_block;
+  const GraphElem cap  = (GraphElem)sm_count() * blocks_per_sm;
+  return (unsigned)std::max<GraphElem>(1, std::min(need, cap));
+}
+
+// ===========================================================================
+// erange (min/max neighbour) construction
+// ===========================================================================
+
+__global__ void k_build_erange(NodeCSR c, int g, GraphElem* __restrict__ erange)
+{
+  const GraphElem* ind = c.ind[g];
+  const GraphElem* lst = c.lst[g];
+  const GraphElem vb = c.vsplit[g], nv = c.vsplit[g + 1] - vb;
+  for (GraphElem l = blockIdx.x * (GraphElem)blockDim.x + threadIdx.x; l < nv;
+       l += (GraphElem)gridDim.x * blockDim.x) {
+    const GraphElem e0 = ind[l], e1 = ind[l + 1];
+    if (e1 - e0 < 2) continue;  // cannot close a triangle; keep the empty [0,0]
+    const GraphElem u = vb + l;
+    erange[2 * u]     = lst[e0];
+    erange[2 * u + 1] = lst[e1 - 1];
+  }
+}
+
+void vmm_build_erange(const NodeCSR& csr, int g, GraphElem nv, GraphElem* erange,
+                      cudaStream_t stream)
+{
+  if (nv <= 0) return;
+  k_build_erange<<<grid_for(nv, VMM_BLOCK), VMM_BLOCK, 0, stream>>>(csr, g, erange);
+  CudaCall(cudaGetLastError());
+}
+
+// ===========================================================================
+// Intra-node counting (replaces local + IPC-neighbour kernels and their
+// host-built edge masks). One tile per edge (u,v) of GPU g:
+//   skip unless u < v and v is on this node;
+//   adj(v) is read wherever it lives on the node (VMM mapping);
+//   w ranges over adj(u) after v, pruned to [min adj(v), max adj(v)].
+// ===========================================================================
+
+template <int TILE>
+__global__ void k_intranode(NodeCSR c, int g, GraphElem ne, VmmCount* __restrict__ count)
+{
+  auto tile = cg::tiled_partition<TILE>(cg::this_thread_block());
+  const GraphElem* ind = c.ind[g];
+  const GraphElem* lst = c.lst[g];
+  const GraphElem vb = c.vsplit[g], nv = c.vsplit[g + 1] - vb;
+  const GraphElem nbase = c.vsplit[0], nbound = c.vsplit[c.ngpus];
+
+  const GraphElem ntiles = ((GraphElem)gridDim.x * blockDim.x) / TILE;
+  GraphElem t = (blockIdx.x * (GraphElem)blockDim.x + threadIdx.x) / TILE;
+
+  VmmCount my = 0;
+  for (GraphElem e = t; e < ne; e += ntiles) {
+    GraphElem nlo = 0, nhi = 0, deg = 0;
+    unsigned long long adjp = 0;
+    if (tile.thread_rank() == 0) {
+      const GraphElem l = edge_source(ind, nv, e);
+      const GraphElem u = vb + l, v = lst[e], eend = ind[l + 1];
+      if (u < v && v >= nbase && v < nbound && e + 1 < eend) {
+        const GraphElem* adj = node_adj(c, v, deg);
+        if (deg >= 2) {
+          nlo  = dlower(lst, e + 1, eend, adj[0]);
+          nhi  = dupper(lst, nlo, eend, adj[deg - 1]);
+          adjp = reinterpret_cast<unsigned long long>(adj);
+        }
+      }
+    }
+    nlo  = tile.shfl(nlo, 0);
+    nhi  = tile.shfl(nhi, 0);
+    deg  = tile.shfl(deg, 0);
+    adjp = tile.shfl(adjp, 0);
+    const GraphElem* adj = reinterpret_cast<const GraphElem*>(adjp);
+    for (GraphElem n = nlo + tile.thread_rank(); n < nhi; n += TILE)
+      if (dcontains(adj, deg, lst[n])) ++my;
+  }
+  my = cg::reduce(tile, my, cg::plus<VmmCount>());
+  if (tile.thread_rank() == 0 && my) atomicAdd(count, my);
+}
+
+void vmm_count_intranode(const NodeCSR& csr, int g, GraphElem ne, VmmCount* d_count,
+                         cudaStream_t stream)
+{
+  if (ne <= 0) return;
+  const unsigned grid = grid_for(ne, VMM_BLOCK / VMM_TILE);
+  k_intranode<VMM_TILE><<<grid, VMM_BLOCK, 0, stream>>>(csr, g, ne, d_count);
+  CudaCall(cudaGetLastError());
+}
+
+// ===========================================================================
+// Remote plan (GPU-side replacement of the host send-side buffering)
+// ===========================================================================
+
+/// Pair run of local edge e of GPU g (0 if e is not a remote item).
+/// Returns destination node via `dest`, first n via `nlo`.
+__device__ __forceinline__ GraphElem remote_run(const NodeCSR& c, int g, GraphElem e,
+                                                const GraphElem* __restrict__ parts, int nparts,
+                                                const GraphElem* __restrict__ erange,
+                                                int& dest, GraphElem& nlo)
+{
+  const GraphElem* ind = c.ind[g];
+  const GraphElem* lst = c.lst[g];
+  const GraphElem vb = c.vsplit[g], nv = c.vsplit[g + 1] - vb;
+  const GraphElem l = edge_source(ind, nv, e);
+  const GraphElem u = vb + l, v = lst[e], eend = ind[l + 1];
+
+  if (!(u < v) || (v >= c.vsplit[0] && v < c.vsplit[c.ngpus]) || e + 1 >= eend)
+    return 0;
+
+  GraphElem lo = e + 1, hi = eend;
+  if (erange) {  // prune w to [min adj(v), max adj(v)] (as edge_above_min/within_max)
+    const GraphElem emin = erange[2 * v], emax = erange[2 * v + 1];
+    lo = dlower(lst, lo, hi, emin);
+    hi = dupper(lst, lo, hi, emax);
+  }
+  if (hi <= lo) return 0;
+  dest = (int)(dupper(parts, GraphElem(0), (GraphElem)nparts + 1, v) - 1);
+  nlo  = lo;
+  return hi - lo;
+}
+
+/// WRITE=false: count remote items. WRITE=true: compact (dest, edge) of the
+/// remote items with warp-aggregated atomics (order is irrelevant: we sort).
+template <bool WRITE>
+__global__ void k_classify(NodeCSR c, int g, GraphElem ne, const GraphElem* __restrict__ parts,
+                           int nparts, const GraphElem* __restrict__ erange,
+                           unsigned long long* __restrict__ counter,
+                           int* __restrict__ keys, GraphElem* __restrict__ items)
+{
+  const unsigned lane = threadIdx.x & 31u;
+  const GraphElem stride = (GraphElem)gridDim.x * blockDim.x;
+  // Warp-uniform loop so that __ballot_sync sees the full warp.
+  for (GraphElem base = blockIdx.x * (GraphElem)blockDim.x + (threadIdx.x & ~31u); base < ne;
+       base += stride) {
+    const GraphElem e = base + lane;
+    int dest = -1;
+    GraphElem nlo = 0, cnt = 0;
+    if (e < ne) cnt = remote_run(c, g, e, parts, nparts, erange, dest, nlo);
+    const unsigned mask = __ballot_sync(0xffffffffu, cnt > 0);
+    if (!mask) continue;
+    unsigned long long off = 0;
+    if (lane == 0) off = atomicAdd(counter, (unsigned long long)__popc(mask));
+    if (WRITE) {
+      off = __shfl_sync(0xffffffffu, off, 0);
+      if (cnt > 0) {
+        const unsigned long long pos = off + __popc(mask & ((1u << lane) - 1u));
+        keys[pos]  = dest;
+        items[pos] = e;
+      }
+    }
+  }
+}
+
+__global__ void k_plan_gather(NodeCSR c, int g, GraphElem nrem, const GraphElem* __restrict__ parts,
+                              int nparts, const GraphElem* __restrict__ erange,
+                              const GraphElem* __restrict__ items, GraphElem* __restrict__ nlo,
+                              GraphElem* __restrict__ cnt)
+{
+  for (GraphElem j = blockIdx.x * (GraphElem)blockDim.x + threadIdx.x; j <= nrem;
+       j += (GraphElem)gridDim.x * blockDim.x) {
+    if (j == nrem) { cnt[j] = 0; continue; }  // extra slot -> posx[nrem] = total
+    int dest; GraphElem lo = 0;
+    cnt[j] = remote_run(c, g, items[j], parts, nparts, erange, dest, lo);
+    nlo[j] = lo;
+  }
+}
+
+__global__ void k_plan_dests(GraphElem nrem, int nparts, const int* __restrict__ keys,
+                             const GraphElem* __restrict__ posx, GraphElem* __restrict__ dbeg,
+                             GraphElem* __restrict__ doff, GraphElem* __restrict__ dtot)
+{
+  for (int s = blockIdx.x * blockDim.x + threadIdx.x; s < nparts;
+       s += gridDim.x * blockDim.x) {
+    const GraphElem b = dlower(keys, GraphElem(0), nrem, s);
+    const GraphElem e = dlower(keys, b, nrem, s + 1);
+    dbeg[s] = b;
+    doff[s] = posx[b];
+    dtot[s] = posx[e] - posx[b];
+    if (s == nparts - 1) dbeg[nparts] = nrem;
+  }
+}
+
+static int bits_for(int n)
+{
+  int b = 1;
+  while ((1LL << b) <= n) ++b;
+  return b;
+}
+
+void vmm_plan_remote(const NodeCSR& csr, int g, GraphElem ne, const GraphElem* d_parts,
+                     int nparts, int /*my_part*/, const GraphElem* erange,
+                     VmmRemotePlan& plan, cudaStream_t stream)
+{
+  plan = VmmRemotePlan{};
+  CudaCall(cudaMallocAsync(&plan.dbeg, (nparts + 1) * sizeof(GraphElem), stream));
+  CudaCall(cudaMallocAsync(&plan.doff, nparts * sizeof(GraphElem), stream));
+  CudaCall(cudaMallocAsync(&plan.dtot, nparts * sizeof(GraphElem), stream));
+  CudaCall(cudaMemsetAsync(plan.dbeg, 0, (nparts + 1) * sizeof(GraphElem), stream));
+  CudaCall(cudaMemsetAsync(plan.doff, 0, nparts * sizeof(GraphElem), stream));
+  CudaCall(cudaMemsetAsync(plan.dtot, 0, nparts * sizeof(GraphElem), stream));
+  if (ne <= 0) { CudaCall(cudaStreamSynchronize(stream)); return; }
+
+  // 1. count remote items
+  unsigned long long* d_counter = nullptr;
+  CudaCall(cudaMallocAsync(&d_counter, sizeof(unsigned long long), stream));
+  CudaCall(cudaMemsetAsync(d_counter, 0, sizeof(unsigned long long), stream));
+  const unsigned grid = grid_for(ne, VMM_BLOCK);
+  k_classify<false><<<grid, VMM_BLOCK, 0, stream>>>(csr, g, ne, d_parts, nparts, erange,
+                                                     d_counter, nullptr, nullptr);
+  CudaCall(cudaGetLastError());
+  unsigned long long nrem = 0;
+  CudaCall(cudaMemcpyAsync(&nrem, d_counter, sizeof(nrem), cudaMemcpyDeviceToHost, stream));
+  CudaCall(cudaStreamSynchronize(stream));
+  if (nrem == 0) { CudaCall(cudaFreeAsync(d_counter, stream)); CudaCall(cudaStreamSynchronize(stream)); return; }
+  if (nrem >= (unsigned long long)INT_MAX) {
+    std::fprintf(stderr, "vmm_plan_remote: %llu remote items on one GPU exceed the CUB int limit\n", nrem);
+    std::abort();
+  }
+  plan.nrem = (GraphElem)nrem;
+  const int n = (int)nrem;
+
+  // 2. compact (dest, edge)
+  int* keys = nullptr; int* keys_s = nullptr; GraphElem* items = nullptr; GraphElem* cnt = nullptr;
+  CudaCall(cudaMallocAsync(&keys,   n * sizeof(int), stream));
+  CudaCall(cudaMallocAsync(&keys_s, n * sizeof(int), stream));
+  CudaCall(cudaMallocAsync(&items,  n * sizeof(GraphElem), stream));
+  CudaCall(cudaMallocAsync(&plan.items, n * sizeof(GraphElem), stream));
+  CudaCall(cudaMemsetAsync(d_counter, 0, sizeof(unsigned long long), stream));
+  k_classify<true><<<grid, VMM_BLOCK, 0, stream>>>(csr, g, ne, d_parts, nparts, erange,
+                                                    d_counter, keys, items);
+  CudaCall(cudaGetLastError());
+
+  // 3. group by destination (radix sort on the low bits only)
+  void* tmp = nullptr; size_t tmp_bytes = 0, need = 0;
+  CudaCall(cub::DeviceRadixSort::SortPairs(nullptr, need, keys, keys_s, items, plan.items, n,
+                                             0, bits_for(nparts), stream));
+  tmp_bytes = need;
+  CudaCall(cudaMallocAsync(&tmp, tmp_bytes, stream));
+  CudaCall(cub::DeviceRadixSort::SortPairs(tmp, tmp_bytes, keys, keys_s, items, plan.items, n,
+                                             0, bits_for(nparts), stream));
+  CudaCall(cudaFreeAsync(keys, stream));
+  CudaCall(cudaFreeAsync(items, stream));
+
+  // 4. per-item run start + count, exclusive scan -> pair positions
+  CudaCall(cudaMallocAsync(&plan.nlo,  n * sizeof(GraphElem), stream));
+  CudaCall(cudaMallocAsync(&cnt,  (n + 1) * sizeof(GraphElem), stream));
+  CudaCall(cudaMallocAsync(&plan.posx, (n + 1) * sizeof(GraphElem), stream));
+  k_plan_gather<<<grid_for(n + 1, VMM_BLOCK), VMM_BLOCK, 0, stream>>>(
+      csr, g, plan.nrem, d_parts, nparts, erange, plan.items, plan.nlo, cnt);
+  CudaCall(cudaGetLastError());
+
+  need = 0;
+  CudaCall(cub::DeviceScan::ExclusiveSum(nullptr, need, cnt, plan.posx, n + 1, stream));
+  if (need > tmp_bytes) {
+    CudaCall(cudaFreeAsync(tmp, stream));
+    tmp_bytes = need;
+    CudaCall(cudaMallocAsync(&tmp, tmp_bytes, stream));
+  }
+  CudaCall(cub::DeviceScan::ExclusiveSum(tmp, tmp_bytes, cnt, plan.posx, n + 1, stream));
+
+  // 5. destination ranges
+  k_plan_dests<<<grid_for(nparts, VMM_BLOCK), VMM_BLOCK, 0, stream>>>(
+      plan.nrem, nparts, keys_s, plan.posx, plan.dbeg, plan.doff, plan.dtot);
+  CudaCall(cudaGetLastError());
+
+  CudaCall(cudaMemcpyAsync(&plan.npairs, plan.posx + n, sizeof(GraphElem),
+                             cudaMemcpyDeviceToHost, stream));
+  CudaCall(cudaFreeAsync(tmp, stream));
+  CudaCall(cudaFreeAsync(cnt, stream));
+  CudaCall(cudaFreeAsync(keys_s, stream));
+  CudaCall(cudaFreeAsync(d_counter, stream));
+  CudaCall(cudaStreamSynchronize(stream));
+}
+
+void vmm_plan_free(VmmRemotePlan& plan)
+{
+  // cudaFree on nullptr is a no-op. Caller has the owning device current.
+  cudaFree(plan.items); cudaFree(plan.nlo); cudaFree(plan.posx);
+  cudaFree(plan.dbeg);  cudaFree(plan.doff); cudaFree(plan.dtot);
+  plan = VmmRemotePlan{};
+}
+
+// ===========================================================================
+// Pair generation: GPU fills its own send buffers for round k
+// (replaces lookup_edges() + sbuf_/sbuf_ctr_/prev_m_/prev_k_ on the host)
+// ===========================================================================
+
+__global__ void k_generate(NodeCSR c, int g, const GraphElem* __restrict__ items,
+                           const GraphElem* __restrict__ nlo, const GraphElem* __restrict__ posx,
+                           const VmmSendSlot* __restrict__ slots, int nslots, int round,
+                           GraphElem* __restrict__ sbuf)
+{
+  const GraphElem* lst = c.lst[g];
+  for (int s = blockIdx.y; s < nslots; s += gridDim.y) {
+    const VmmSendSlot S = slots[s];
+    const GraphElem start = (GraphElem)round * S.cap;
+    if (start >= S.tot) continue;
+    const GraphElem len = (S.tot - start < S.cap) ? (S.tot - start) : S.cap;
+    GraphElem* out = sbuf + S.bufoff + (GraphElem)(round % S.nsets) * S.cap * 2;
+
+    for (GraphElem p = blockIdx.x * (GraphElem)blockDim.x + threadIdx.x; p < len;
+         p += (GraphElem)gridDim.x * blockDim.x) {
+      const GraphElem gp = S.doff + start + p;
+      // item j with posx[j] <= gp < posx[j+1]; every item in [dbeg,dend) has cnt > 0
+      const GraphElem j = dupper(posx, S.dbeg, S.dend, gp) - 1;
+      out[2 * p]     = lst[items[j]];                 // v (owned by S.dest)
+      out[2 * p + 1] = lst[nlo[j] + (gp - posx[j])];  // w
+    }
+  }
+}
+
+void vmm_generate_pairs(const NodeCSR& csr, int g, const VmmRemotePlan& plan,
+                        const VmmSendSlot* d_slots, int nslots, GraphElem max_cap, int round,
+                        GraphElem* sbuf, cudaStream_t stream)
+{
+  if (nslots <= 0 || max_cap <= 0) return;
+  dim3 grid(grid_for(max_cap, VMM_BLOCK, 8), (unsigned)std::min(nslots, 65535));
+  k_generate<<<grid, VMM_BLOCK, 0, stream>>>(csr, g, plan.items, plan.nlo, plan.posx, d_slots,
+                                             nslots, round, sbuf);
+  CudaCall(cudaGetLastError());
+}
+
+// ===========================================================================
+// Receive-side counting directly on the (RDMA-written) VMM receive buffer
+// ===========================================================================
+
+__global__ void k_count_recv(NodeCSR c, const GraphElem* __restrict__ rbuf, GraphElem npairs,
+                             VmmCount* __restrict__ count)
+{
+  auto warp = cg::tiled_partition<32>(cg::this_thread_block());
+  VmmCount my = 0;
+  for (GraphElem i = blockIdx.x * (GraphElem)blockDim.x + threadIdx.x; i < npairs;
+       i += (GraphElem)gridDim.x * blockDim.x) {
+    const GraphElem v = rbuf[2 * i], w = rbuf[2 * i + 1];
+    GraphElem deg = 0;
+    const GraphElem* adj = node_adj(c, v, deg);  // any GPU of this node
+    if (dcontains(adj, deg, w)) ++my;
+  }
+  my = cg::reduce(warp, my, cg::plus<VmmCount>());
+  if (warp.thread_rank() == 0 && my) atomicAdd(count, my);
+}
+
+void vmm_count_recv(const NodeCSR& csr, const GraphElem* rbuf, GraphElem npairs,
+                    VmmCount* d_count, cudaStream_t stream)
+{
+  if (npairs <= 0) return;
+  k_count_recv<<<grid_for(npairs, VMM_BLOCK), VMM_BLOCK, 0, stream>>>(csr, rbuf, npairs, d_count);
+  CudaCall(cudaGetLastError());
+}
+#endif

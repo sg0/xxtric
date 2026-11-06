@@ -427,4 +427,92 @@ void local_count_cpu_recv
  const GraphElem* __restrict__ edge_list,
  GraphElem* __restrict__ local_count
  );
+
+#if defined(USE_CUDA_VMM_MPI)
+// Kernels + host launchers for the VMM / GPU-buffered distributed triangle
+// counting variant (xxtric-gpu-vmm-mpi.hpp).
+struct NodeCSR
+{
+  int ngpus = 0;
+  const GraphElem* vsplit = nullptr;       // [ngpus+1]
+  const GraphElem* const* ind = nullptr;   // [ngpus]
+  const GraphElem* const* lst = nullptr;   // [ngpus]
+};
+
+/// Remote-work plan of one GPU, built entirely on that GPU.
+///
+/// A "remote item" is an edge (u,v) owned by this GPU with u < v and v on a
+/// different node; it produces cnt = |{n : lst[n] in [nlo, nlo+cnt)}| wedge
+/// pairs (v, w) that the owner of v must check (is w a neighbour of v?).
+/// Items are sorted by destination node, and an exclusive scan over the
+/// counts (posx) gives every pair a unique position. Destination s owns the
+/// contiguous position range [doff[s], doff[s] + dtot[s]) and the items
+/// [dbeg[s], dbeg[s+1]). So any GPU thread can materialise pair #p of any
+/// destination in O(log) without counters, atomics or host involvement.
+struct VmmRemotePlan
+{
+  GraphElem  nrem  = 0;        // #remote items
+  GraphElem  npairs = 0;       // #pairs over all destinations
+  GraphElem* items = nullptr;  // [nrem]   edge index (local to this GPU), sorted by dest
+  GraphElem* nlo   = nullptr;  // [nrem]   first n of the item's pair run
+  GraphElem* posx  = nullptr;  // [nrem+1] exclusive scan of pair counts
+  GraphElem* dbeg  = nullptr;  // [nparts+1] first item per destination
+  GraphElem* doff  = nullptr;  // [nparts] first pair position per destination
+  GraphElem* dtot  = nullptr;  // [nparts] #pairs per destination
+};
+
+/// One outgoing stream (this GPU -> destination node), as seen by the
+/// pair-generation kernel. The stream is cut into rounds of `cap` pairs;
+/// round k writes into set (k % nsets) of the slot's buffer region.
+struct VmmSendSlot
+{
+  GraphElem dbeg, dend;  // item range
+  GraphElem doff;        // first pair position
+  GraphElem tot;         // #pairs in this stream
+  GraphElem cap;         // pairs per round (<= tot)
+  GraphElem bufoff;      // offset of set 0 in the GPU's comm chunk, in GraphElem units
+  int nsets;             // 1 or 2 (double buffering when rounds > 1)
+  int dest;              // destination node (MPI rank)
+};
+
+/// Triangle counters are always 64-bit unsigned (independent of GraphElem).
+using VmmCount = unsigned long long;
+
+// ---------------------------------------------------------------------------
+// Host launchers (all asynchronous on `stream` unless noted). The caller must
+// have made the GPU that owns `stream` current (cudaSetDevice).
+// ---------------------------------------------------------------------------
+
+/// erange[2u], erange[2u+1] = min/max neighbour of every vertex u owned by
+/// GPU g (nv = #vertices of GPU g) with degree >= 2 (others are left untouched, i.e. 0/0 -> empty).
+/// `erange` is a node-wide VMM pointer; stores may land on peer GPUs.
+void vmm_build_erange(const NodeCSR& csr, int g, GraphElem nv, GraphElem* erange,
+                      cudaStream_t stream);
+
+/// Count every triangle u < v < w whose wedge (u,v,w) is fully node-local:
+/// u owned by GPU g, v anywhere on this node (adjacency read via VMM).
+void vmm_count_intranode(const NodeCSR& csr, int g, GraphElem ne,
+                         VmmCount* d_count, cudaStream_t stream);
+
+/// Build the remote plan for GPU g (classify -> compact -> sort -> scan).
+/// Allocates the plan arrays on the current device. SYNCHRONOUS on `stream`
+/// (it needs the number of remote items on the host to size allocations).
+/// `erange` may be nullptr (no min/max pruning).
+void vmm_plan_remote(const NodeCSR& csr, int g, GraphElem ne,
+                     const GraphElem* d_parts, int nparts, int my_part,
+                     const GraphElem* erange, VmmRemotePlan& plan,
+                     cudaStream_t stream);
+
+void vmm_plan_free(VmmRemotePlan& plan);
+
+/// Write the pairs of round `round` of every slot into the comm buffer
+/// `sbuf` (GPU g's chunk). `max_cap` = max over slots of cap.
+void vmm_generate_pairs(const NodeCSR& csr, int g, const VmmRemotePlan& plan,
+                        const VmmSendSlot* d_slots, int nslots, GraphElem max_cap,
+                        int round, GraphElem* sbuf, cudaStream_t stream);
+
+/// Check `npairs` received pairs (v, w), v owned by this node: count w in adj(v).
+void vmm_count_recv(const NodeCSR& csr, const GraphElem* rbuf, GraphElem npairs,
+                    VmmCount* d_count, cudaStream_t stream);
+#endif
 #endif

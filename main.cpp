@@ -26,6 +26,8 @@
 #include "xxtric-gpu-ipc.hpp"
 #elif defined(USE_CUDA_IPC_MPI)
 #include "xxtric-gpu-ipc-mpi.hpp"
+#elif defined(USE_CUDA_VMM_MPI)
+#include "xxtric-gpu-vmm-mpi.hpp"
 #else
 #include "xxtric.hpp"
 #endif
@@ -170,6 +172,9 @@ int main(int argc, char *argv[])
     double avg_t = (double)(t_tot/(double)nprocs);
 #if defined(USE_CUDA_IPC)
       std::cout << "Performed counting (using CUDA IPC) on " << nprocs << " GPUs" << std::endl;
+#elif defined(USE_CUDA_VMM_MPI)
+      std::cout << "Using CUDA VMM and GPU-buffered CUDA-aware MPI: Avg/Min/Max execution time (secs.) for triangle counting on " << nprocs << " nodes: " 
+        << avg_t << ", " << t_min << ", " << t_max << std::endl;
 #elif defined(USE_CUDA_IPC_MPI)
       std::cout << "Using CUDA IPC and MPI: Avg/Min/Max execution time (secs.) for triangle counting on " << nprocs << " processes: " 
         << avg_t << ", " << t_min << ", " << t_max << std::endl;
