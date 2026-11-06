@@ -2,8 +2,14 @@
 #ifndef XXTRIC_GPU_VMM_MPI_HPP
 #define XXTRIC_GPU_VMM_MPI_HPP
 
-// requires CUDA-aware MPI that accepts CUDA VMM memory 
-// (P2P between GPUs/node via NVLink / PCIe)
+// Compile-time options
+//   XXTRIC_VMM_NO_ERANGE_FILTER   skip the min/max-neighbour pruning (saves the
+//                                 O(2*nv) replicated array, sends more pairs)
+//   XXTRIC_VMM_NO_GDR             do not request GPUDirect-RDMA-capable memory
+//
+// Run-time environment
+//   XXTRIC_VMM_COMM_MB            comm buffer budget per GPU in MB, or
+//   XXTRIC_VMM_COMM_FRAC          fraction of free GPU memory (default 0.5);
 
 #include <mpi.h>
 #include <cuda_runtime.h>
@@ -11,6 +17,7 @@
 #include <algorithm>
 #include <climits>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -21,7 +28,7 @@
 #include <string>
 #include <vector>
 
-#include "vmm_mpi.h"         
+#include "vmm_mpi.h"         // vmm::DistributedBuffer (includes vmm_multigpu.h)
 #include "counting.cuh"  
 
 #ifndef XXTRIC_VMM_TAG_BASE
@@ -213,6 +220,7 @@ class TriangleCounting
         max_elems = std::max(max_elems, (size_t)(gpus_[h].nv + 1 + gpus_[h].ne));
       }
       {
+        mem_report("CSR", max_elems * sizeof(GraphElem));
         vmm::MultiGpuBufferOptions o;
         o.bytesPerDevice        = max_elems * sizeof(GraphElem);
         o.devices               = devs_;
@@ -313,12 +321,51 @@ class TriangleCounting
         for (int s = 0; s < size_; s++) sendT[(size_t)s * maxg_ + h] = gpus_[h].dtot[s];
       MPI_Alltoall(sendT.data(), maxg_, MPI_GRAPH_TYPE, recvT.data(), maxg_, MPI_GRAPH_TYPE, comm_);
 
-      // Pairs per message; must be identical on all ranks (sender and
-      // receiver derive message sizes independently from it).
+      // Pairs per message (cap). Must be identical on all ranks: sender and
+      // receiver derive message sizes from it independently.
+      //
+      // The comm chunk of GPU h holds one slot per non-empty stream (outgoing
+      // and incoming), each nsets(<=2) x cap pairs x 2 GraphElem. Sizing slots
+      // by stream totals (cap = "unlimited") makes the chunk as large as all
+      // inter-node wedge pairs of the GPU -- typically many times the edge
+      // count -- and every GPU then allocates the MAX over all ranks
+      // (DistributedBuffer agrees on one chunk size). So cap is bounded by a
+      // per-GPU memory budget:
+      //     max_h nslots_h * 2 * cap * 2 * sizeof(GraphElem) <= min_h budget_h
+      // budget_h = XXTRIC_VMM_COMM_MB (env) if set, else
+      //            XXTRIC_VMM_COMM_FRAC (env, default 0.5) x free memory now.
+      std::vector<int> nslots(ngpus_, 0);
+      for (int h = 0; h < ngpus_; h++)
+        for (int s = 0; s < size_; s++) nslots[h] += (gpus_[h].dtot[s] > 0);
+      for (int s = 0; s < size_; s++)
+        for (int gp = 0; gp < maxg_; gp++)
+          nslots[gp % ngpus_] += (recvT[(size_t)s * maxg_ + gp] > 0);
+
+      unsigned long long budget = comm_budget_bytes();
+      int maxslots = *std::max_element(nslots.begin(), nslots.end());
+      MPI_Allreduce(MPI_IN_PLACE, &budget, 1, MPI_UNSIGNED_LONG_LONG, MPI_MIN, comm_);
+      MPI_Allreduce(MPI_IN_PLACE, &maxslots, 1, MPI_INT, MPI_MAX, comm_);
+
       long long capll = (bufsize > 0) ? std::max<long long>(1, (long long)bufsize / 2)
                                       : std::numeric_limits<long long>::max();
+      if (maxslots > 0) {
+        const unsigned long long per_pair = 2ull * 2ull * sizeof(GraphElem);  // 2 sets x (v,w)
+        const unsigned long long slack    = (unsigned long long)maxslots * kAlign;
+        const long long mem_cap = budget > slack
+            ? (long long)((budget - slack) / ((unsigned long long)maxslots * per_pair)) : 0;
+        if (mem_cap < 1024) {
+          if (rank_ == 0)
+            std::cerr << "*Error*: comm budget " << budget / 1048576.0 << " MB/GPU is too small for "
+                      << maxslots << " streams per GPU; raise XXTRIC_VMM_COMM_MB/_FRAC or use more GPUs."
+                      << std::endl;
+          MPI_Abort(comm_, -99);
+        }
+        capll = std::min(capll, mem_cap);
+      }
       MPI_Allreduce(MPI_IN_PLACE, &capll, 1, MPI_LONG_LONG, MPI_MIN, comm_);
       cap_pairs_ = (GraphElem)std::min<long long>(capll, std::numeric_limits<GraphElem>::max());
+      comm_budget_ = budget;
+      max_slots_   = maxslots;
 
       // 7. Lay out each GPU's comm chunk: [out slots | in slots], each slot
       //    = nsets x cap pairs. Double-buffered only if the stream needs >1 round.
@@ -328,7 +375,7 @@ class TriangleCounting
         rounds = (int)((tot + cap - 1) / cap);
         nsets  = rounds > 1 ? 2 : 1;
         off    = used[h];
-        used[h] = align_up(used[h] + (size_t)nsets * cap * 2 * sizeof(GraphElem));
+        used[h] = align_up(used[h] + (size_t)nsets * (size_t)cap * 2 * sizeof(GraphElem));
       };
       for (int h = 0; h < ngpus_; h++)
         for (int s = 0; s < size_; s++) {
@@ -352,6 +399,7 @@ class TriangleCounting
       // 8. Comm buffers: one RDMA-capable VMM chunk per GPU, all GPUs of all
       //    nodes (vmm::DistributedBuffer; collective, sizes agreed inside).
       {
+        mem_report("comm buffer", comm_bytes);
         vmm::DistributedBufferOptions o;
         o.bytesPerDevice        = comm_bytes;
         o.devices               = devs_;
@@ -402,6 +450,7 @@ class TriangleCounting
       const size_t total = (size_t)nv * 2;
       const size_t per   = (total + ngpus_ - 1) / ngpus_;
 
+      mem_report("erange (replicated min/max neighbours)", std::max<size_t>(per, 1) * sizeof(GraphElem));
       vmm::MultiGpuBufferOptions o;
       o.bytesPerDevice        = std::max<size_t>(per, 1) * sizeof(GraphElem);
       o.devices               = devs_;
@@ -434,6 +483,44 @@ class TriangleCounting
       return er;
     }
 
+    /// Smallest free device memory on this node right now (bytes).
+    size_t min_free_bytes()
+    {
+      size_t mn = std::numeric_limits<size_t>::max();
+      for (int d : devs_) {
+        size_t fr = 0, tot = 0;
+        CudaCall(cudaSetDevice(d));
+        CudaCall(cudaMemGetInfo(&fr, &tot));
+        mn = std::min(mn, fr);
+      }
+      return mn;
+    }
+
+    /// Per-GPU byte budget for the comm chunk (see setup step 6).
+    unsigned long long comm_budget_bytes()
+    {
+      if (const char* mb = std::getenv("XXTRIC_VMM_COMM_MB"))
+        return (unsigned long long)std::max(1.0, std::atof(mb)) * 1048576ull;
+      double frac = 0.5;
+      if (const char* f = std::getenv("XXTRIC_VMM_COMM_FRAC")) frac = std::atof(f);
+      frac = std::min(0.95, std::max(0.01, frac));
+      return (unsigned long long)(frac * (double)min_free_bytes());
+    }
+
+    /// Collective. Prints (rank 0) the per-GPU size about to be allocated,
+    /// max over ranks, against the smallest free memory over all GPUs.
+    void mem_report(const char* what, size_t bytes)
+    {
+      unsigned long long b = bytes, bmax = 0;
+      unsigned long long fr = min_free_bytes(), frmin = 0;
+      MPI_Reduce(&b, &bmax, 1, MPI_UNSIGNED_LONG_LONG, MPI_MAX, 0, comm_);
+      MPI_Reduce(&fr, &frmin, 1, MPI_UNSIGNED_LONG_LONG, MPI_MIN, 0, comm_);
+      if (rank_ == 0)
+        std::cout << "VMM alloc [" << what << "]: " << bmax / 1048576.0
+                  << " MB per GPU (max over ranks); min free GPU memory "
+                  << frmin / 1048576.0 << " MB" << std::endl;
+    }
+
     void sync_all(cudaStream_t Gpu::*s)
     {
       for (auto& G : gpus_) {
@@ -455,6 +542,8 @@ class TriangleCounting
         std::cout << "VMM CSR chunk/GPU (MB): " << csr_bytes / 1048576.0
                   << ", comm chunk/GPU (MB): " << comm_bytes / 1048576.0 << std::endl;
         std::cout << "Inter-node wedge pairs: total " << psum << ", max per node " << pmax
+                  << ", comm budget/GPU (MB): " << comm_budget_ / 1048576.0
+                  << ", max streams/GPU: " << max_slots_
                   << ", pairs per message: "
                   << (cap_pairs_ == std::numeric_limits<GraphElem>::max() ? std::string("unlimited")
                                                                            : std::to_string(cap_pairs_))
@@ -599,7 +688,8 @@ class TriangleCounting
     std::vector<OutSlot> outs_;
     std::vector<InSlot> ins_;
     GraphElem cap_pairs_ = std::numeric_limits<GraphElem>::max();
-    int max_rounds_ = 0, global_rounds_ = 0;
+    int max_rounds_ = 0, global_rounds_ = 0, max_slots_ = 0;
+    unsigned long long comm_budget_ = 0;
     GraphElem ntriangles_ = 0;
 };
 
